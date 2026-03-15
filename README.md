@@ -85,19 +85,6 @@ Todas as runs sao persistidas no SQLite com status lifecycle (`queued` → `runn
 
 ## Configuracao
 
-Prioridade: **env vars** > **settings.json** > **defaults**
-
-### Variaveis de ambiente
-
-| Variavel               | Default                  | Descricao                          |
-| ---------------------- | ------------------------ | ---------------------------------- |
-| `OLLAMA_HOST`          | `http://localhost:11434` | Endpoint do Ollama                 |
-| `DEFAULT_MODEL`        | `qwen3:8b`               | Modelo padrao                      |
-| `MAX_TOOL_ITERATIONS`  | `10`                     | Max iteracoes de tools por request |
-| `DB_PATH`              | `./data/julia.db`        | Caminho do banco SQLite            |
-| `COMPACTION_THRESHOLD` | `6000`                   | Tokens antes de compactar contexto |
-| `WORKSPACE`            | `.`                      | Diretorio de workspace             |
-
 ### Settings file (`~/.juliacode/settings.json`)
 
 ```json
