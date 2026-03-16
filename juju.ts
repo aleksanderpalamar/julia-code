@@ -8,13 +8,19 @@ import { initProviders } from './src/providers/registry.js';
 import { initTools } from './src/tools/registry.js';
 import { initWorkspace } from './src/config/workspace.js';
 import { startGateway } from './src/gateway/server.js';
+import { initMcpServers, shutdownMcpServers } from './src/mcp/index.js';
 
 // Bootstrap
-loadConfig();
-getDb();          // Initialize database
-initProviders();  // Register LLM providers
-initTools();      // Register tools
-initWorkspace();  // Create workspace directory
+async function bootstrap() {
+  loadConfig();
+  getDb();          // Initialize database
+  initProviders();  // Register LLM providers
+  initTools();      // Register tools
+  initWorkspace();  // Create workspace directory
+  await initMcpServers();  // Connect MCP servers and register their tools
+}
+
+await bootstrap();
 
 // Parse CLI args
 const args = process.argv.slice(2);
@@ -47,7 +53,8 @@ if (mode === 'gateway') {
     React.createElement(App, { sessionId })
   );
 
-  waitUntilExit().then(() => {
+  waitUntilExit().then(async () => {
+    await shutdownMcpServers();
     closeDb();
     process.exit(0);
   });

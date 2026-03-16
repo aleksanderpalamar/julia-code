@@ -25,6 +25,14 @@ export const SettingsModelSchema = z.object({
   contextWindow: z.number().optional(),
 });
 
+export const McpServerConfigSchema = z.object({
+  command: z.string(),
+  args: z.array(z.string()).default([]),
+  env: z.record(z.string()).optional(),
+});
+
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
 export const SettingsSchema = z.object({
   meta: z.object({
     version: z.string(),
@@ -54,6 +62,7 @@ export const SettingsSchema = z.object({
     subagentMaxIterations: z.number().default(15),
     defaultModel: z.string().nullable().default(null),
   }).optional(),
+  mcpServers: z.record(McpServerConfigSchema).optional(),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
