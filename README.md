@@ -83,7 +83,61 @@ Orchestration Run (run_id)
 
 Todas as runs sao persistidas no SQLite com status lifecycle (`queued` → `running` → `completed`/`failed`), timestamps e duracao.
 
-## Configuracao
+## Model Context Protocol (MCP)
+
+Para conectar um novo servidor de mcp basta editar `~/.juliacode/settings.json` e adicionar a sessão `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/usuario"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+Cada entrada em mcpServers é um servidor MCP com:
+
+| Campo     | Obrigatorio | Descricao                                    |
+| --------- | ----------- | -------------------------------------------- |
+| `command` | sim         | Comando para iniciar o servidor              |
+| `args`    | nao         | Array de argumentos (default: `[]`)          |
+| `env`     | nao         | Variaveis de ambiente extras para o processo |
+
+Exemplo com múltiplos servidores:
+
+```json
+{
+  "models": { "default": "qwen3:8b" },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/usuario"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_seutoken" }
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "/caminho/banco.db"]
+    }
+  }
+}
+```
+
+Ao iniciar o Julia Code, ela conecta a cada servidor e registra as tools automaticamente. O agente verá tools com nomes como `mcp__filesystem__read_file`,
+`mcp__github__create_issue`, etc. E pode usá-las normalmente durante a conversa, se quiser remover um servidor, basta apagar a entrada e reiniciar.
+
+## Configuração
 
 ### Settings file (`~/.juliacode/settings.json`)
 
