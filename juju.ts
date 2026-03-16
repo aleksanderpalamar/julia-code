@@ -9,12 +9,14 @@ import { initTools } from './src/tools/registry.js';
 import { initWorkspace } from './src/config/workspace.js';
 import { startGateway } from './src/gateway/server.js';
 import { initMcpServers, shutdownMcpServers } from './src/mcp/index.js';
+import { syncAvailableModels } from './src/config/mcp.js';
 
 // Bootstrap
 async function bootstrap() {
   loadConfig();
   getDb();          // Initialize database
   initProviders();  // Register LLM providers
+  await syncAvailableModels();  // Populate models.available from Ollama
   initTools();      // Register tools
   initWorkspace();  // Create workspace directory
   await initMcpServers();  // Connect MCP servers and register their tools

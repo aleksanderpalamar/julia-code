@@ -40,3 +40,12 @@ export function removeMcpServerConfig(name: string): void {
   }
   writeSettings(settings);
 }
+
+export async function syncAvailableModels(): Promise<void> {
+  const { listOllamaModels } = await import('../providers/ollama.js');
+  const models = await listOllamaModels();
+  const settings = readSettings();
+  if (!settings.models) settings.models = {};
+  settings.models.available = models.map(m => ({ id: m, name: m }));
+  writeSettings(settings);
+}
