@@ -92,6 +92,14 @@ export function App({ sessionId }: Props) {
         return;
       }
 
+      // Catch-all for unrecognized /trust subcommands
+      if (text.startsWith("/trust")) {
+        addSystemEntry(
+          "Usage:\n  /trust             — list trusted dirs\n  /trust revoke <path> — revoke trust\n  /trust revoke-all    — revoke all"
+        );
+        return;
+      }
+
       // /mcp commands
       if (text === "/mcp" || text === "/mcp list") {
         const configs = getMcpServerConfigs();
@@ -141,6 +149,14 @@ export function App({ sessionId }: Props) {
         removeMcpServer(name);
         removeMcpServerConfig(name);
         addSystemEntry(`MCP server '${name}' removed.`);
+        return;
+      }
+
+      // Catch-all for unrecognized /mcp subcommands
+      if (text.startsWith("/mcp")) {
+        addSystemEntry(
+          "Usage:\n  /mcp             — list servers\n  /mcp add <name> <command> [args...]  — add server\n  /mcp remove <name>  — remove server"
+        );
         return;
       }
 
