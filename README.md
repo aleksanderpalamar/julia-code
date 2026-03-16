@@ -1,78 +1,80 @@
+🌐 [Português](README.pt-BR.md)
+
 # Julia Code
 
-Assistente de programacao IA que roda no terminal, alimentada por modelos locais via [Ollama](https://ollama.com). Possui sessoes persistentes, memoria de longo prazo, execucao de ferramentas autonoma e orquestracao paralela de subagentes.
+AI programming assistant that runs in the terminal, powered by local models via [Ollama](https://ollama.com). Features persistent sessions, long-term memory, autonomous tool execution, and parallel subagent orchestration.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  julia> crie um servidor REST com 3 endpoints    │
+│  julia> create a REST server with 3 endpoints    │
 │                                                  │
-│  🔀 Tarefa complexa — spawnando 3 subagentes...  │
-│    → Subagente: endpoint GET /users              │
-│    → Subagente: endpoint POST /users             │
-│    → Subagente: endpoint DELETE /users/:id        │
-│  ✅ 3 completados, nenhuma falha                 │
+│  🔀 Complex task — spawning 3 subagents...       │
+│    → Subagent: endpoint GET /users               │
+│    → Subagent: endpoint POST /users              │
+│    → Subagent: endpoint DELETE /users/:id         │
+│  ✅ 3 completed, no failures                     │
 └──────────────────────────────────────────────────┘
 ```
 
-## Requisitos
+## Requirements
 
 - **Node.js** >= 18
-- **Ollama** rodando localmente (`http://localhost:11434`)
+- **Ollama** running locally (`http://localhost:11434`)
 
-## Instalacao
+## Installation
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aleksanderpalamar/julia-code/main/install.sh | bash
 ```
 
-## Uso
+## Usage
 
-### TUI (modo interativo)
+### TUI (interactive mode)
 
 ```bash
-juju                             # iniciar chat
-juju --session <id>              # retomar sessao existente
+juju                             # start chat
+juju --session <id>              # resume existing session
 ```
 
-### Gateway HTTP
+### HTTP Gateway
 
 ```bash
-juju --gateway                                  # padrao: 127.0.0.1:18800
-juju --gateway --host 0.0.0.0 --port 3000      # host/porta customizados
+juju --gateway                                  # default: 127.0.0.1:18800
+juju --gateway --host 0.0.0.0 --port 3000      # custom host/port
 ```
 
 **Endpoints:**
 
-| Metodo | Rota                     | Descricao                |
+| Method | Route                    | Description              |
 | ------ | ------------------------ | ------------------------ |
 | `GET`  | `/health`                | Health check             |
-| `GET`  | `/sessions`              | Listar sessoes           |
-| `POST` | `/sessions`              | Criar sessao             |
-| `GET`  | `/sessions/:id`          | Detalhes da sessao       |
-| `GET`  | `/sessions/:id/messages` | Mensagens da sessao      |
-| `POST` | `/chat`                  | Chat (resposta completa) |
+| `GET`  | `/sessions`              | List sessions            |
+| `POST` | `/sessions`              | Create session           |
+| `GET`  | `/sessions/:id`          | Session details          |
+| `GET`  | `/sessions/:id/messages` | Session messages         |
+| `POST` | `/chat`                  | Chat (full response)     |
 | `POST` | `/chat/stream`           | Chat (SSE streaming)     |
 
-## Ferramentas
+## Tools
 
-A Julia tem acesso a 10 ferramentas que executa autonomamente:
+Julia has access to 10 tools that it executes autonomously:
 
-| Ferramenta | Descricao                                |
+| Tool       | Description                              |
 | ---------- | ---------------------------------------- |
-| `exec`     | Executar comandos shell (git, npm, etc.) |
-| `read`     | Ler arquivos com numeros de linha        |
-| `write`    | Criar/sobrescrever arquivos              |
-| `edit`     | Substituir trechos de texto em arquivos  |
-| `glob`     | Buscar arquivos por padrao glob          |
-| `grep`     | Buscar conteudo com regex                |
-| `fetch`    | Acessar URLs, APIs e paginas web         |
-| `memory`   | Memorias persistentes entre sessoes      |
-| `sessions` | Gerenciar sessoes salvas                 |
-| `subagent` | Orquestrar subagentes paralelos          |
+| `exec`     | Run shell commands (git, npm, etc.)      |
+| `read`     | Read files with line numbers             |
+| `write`    | Create/overwrite files                   |
+| `edit`     | Replace text segments in files           |
+| `glob`     | Search files by glob pattern             |
+| `grep`     | Search content with regex                |
+| `fetch`    | Access URLs, APIs, and web pages         |
+| `memory`   | Persistent memories across sessions      |
+| `sessions` | Manage saved sessions                    |
+| `subagent` | Orchestrate parallel subagents           |
 
-## Subagentes (ACP)
+## Subagents (ACP)
 
-Quando habilitado, a Julia detecta automaticamente tarefas complexas e paralelizaveis, spawnando subagentes independentes com sessoes proprias. Cada subagente pode usar um modelo diferente.
+When enabled, Julia automatically detects complex, parallelizable tasks and spawns independent subagents with their own sessions. Each subagent can use a different model.
 
 ```
 Orchestration Run (run_id)
@@ -81,11 +83,11 @@ Orchestration Run (run_id)
 └── SubagentRun 3 — api server    [qwen3.5:397b-cloud]    completed 3.1s
 ```
 
-Todas as runs sao persistidas no SQLite com status lifecycle (`queued` → `running` → `completed`/`failed`), timestamps e duracao.
+All runs are persisted in SQLite with status lifecycle (`queued` → `running` → `completed`/`failed`), timestamps, and duration.
 
 ## Model Context Protocol (MCP)
 
-Para conectar um novo servidor de mcp basta editar `~/.juliacode/settings.json` e adicionar a sessão `mcpServers`:
+To connect a new MCP server, edit `~/.juliacode/settings.json` and add the `mcpServers` section:
 
 ```json
 {
@@ -95,7 +97,7 @@ Para conectar um novo servidor de mcp basta editar `~/.juliacode/settings.json` 
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/home/usuario"
+        "/home/user"
       ],
       "env": {}
     }
@@ -103,15 +105,15 @@ Para conectar um novo servidor de mcp basta editar `~/.juliacode/settings.json` 
 }
 ```
 
-Cada entrada em mcpServers é um servidor MCP com:
+Each entry in mcpServers is an MCP server with:
 
-| Campo     | Obrigatorio | Descricao                                    |
-| --------- | ----------- | -------------------------------------------- |
-| `command` | sim         | Comando para iniciar o servidor              |
-| `args`    | nao         | Array de argumentos (default: `[]`)          |
-| `env`     | nao         | Variaveis de ambiente extras para o processo |
+| Field     | Required | Description                                  |
+| --------- | -------- | -------------------------------------------- |
+| `command` | yes      | Command to start the server                  |
+| `args`    | no       | Array of arguments (default: `[]`)           |
+| `env`     | no       | Extra environment variables for the process  |
 
-Exemplo com múltiplos servidores:
+Example with multiple servers:
 
 ```json
 {
@@ -119,25 +121,25 @@ Exemplo com múltiplos servidores:
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/usuario"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
     },
     "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "ghp_seutoken" }
+      "env": { "GITHUB_TOKEN": "ghp_yourtoken" }
     },
     "sqlite": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sqlite", "/caminho/banco.db"]
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "/path/to/database.db"]
     }
   }
 }
 ```
 
-Ao iniciar o Julia Code, ela conecta a cada servidor e registra as tools automaticamente. O agente verá tools com nomes como `mcp__filesystem__read_file`,
-`mcp__github__create_issue`, etc. E pode usá-las normalmente durante a conversa, se quiser remover um servidor, basta apagar a entrada e reiniciar.
+When Julia Code starts, it connects to each server and automatically registers their tools. The agent will see tools named like `mcp__filesystem__read_file`,
+`mcp__github__create_issue`, etc. It can use them normally during conversation. To remove a server, just delete the entry and restart.
 
-## Configuração
+## Configuration
 
 ### Settings file (`~/.juliacode/settings.json`)
 
@@ -168,56 +170,56 @@ Ao iniciar o Julia Code, ela conecta a cada servidor e registra as tools automat
 }
 ```
 
-## Arquitetura
+## Architecture
 
 ```
 juju.ts                          # Entry point (CLI)
 src/
 ├── agent/
 │   ├── loop.ts                  # Agent loop (LLM ↔ tools)
-│   ├── subagent.ts              # Subagent manager + orchestracao
-│   ├── queue.ts                 # Fila de execucao
-│   └── context.ts               # Build de contexto + compactacao
+│   ├── subagent.ts              # Subagent manager + orchestration
+│   ├── queue.ts                 # Execution queue
+│   └── context.ts               # Context building + compaction
 ├── config/
-│   ├── index.ts                 # Carregamento de config
-│   └── workspace.ts             # Diretorio de workspace
+│   ├── index.ts                 # Config loading
+│   └── workspace.ts             # Workspace directory
 ├── gateway/
 │   └── server.ts                # HTTP REST API
 ├── providers/
-│   ├── registry.ts              # Registro de providers
-│   └── ollama.ts                # Provider Ollama
+│   ├── registry.ts              # Provider registry
+│   └── ollama.ts                # Ollama provider
 ├── session/
-│   ├── db.ts                    # Schema SQLite (7 tabelas)
-│   └── manager.ts               # CRUD sessoes, mensagens, memorias, runs
+│   ├── db.ts                    # SQLite schema (7 tables)
+│   └── manager.ts               # CRUD sessions, messages, memories, runs
 ├── skills/
-│   ├── loader.ts                # Loader de skills
-│   └── defaults/                # Skills built-in (base, coder, memory, subagent)
+│   ├── loader.ts                # Skills loader
+│   └── defaults/                # Built-in skills (base, coder, memory, subagent)
 ├── tools/
-│   ├── registry.ts              # Registro de ferramentas
-│   ├── exec.ts, read.ts, ...    # Implementacoes
-│   └── subagent.ts              # Tool de subagentes
+│   ├── registry.ts              # Tool registry
+│   ├── exec.ts, read.ts, ...    # Implementations
+│   └── subagent.ts              # Subagent tool
 └── tui/
-    └── app.tsx                  # Interface terminal (React + Ink)
+    └── app.tsx                  # Terminal interface (React + Ink)
 ```
 
-### Banco de dados
+### Database
 
-SQLite com WAL mode. 7 tabelas:
+SQLite with WAL mode. 7 tables:
 
-- **sessions** — conversas com titulo, modelo, tokens
-- **messages** — mensagens user/assistant/tool com tool_calls
-- **compactions** — resumos de contexto antigo
-- **memories** — memorias persistentes com categorias
-- **orchestration_runs** — batches de subagentes com status/duracao
-- **subagent_runs** — tasks individuais com lifecycle completo
+- **sessions** — conversations with title, model, tokens
+- **messages** — user/assistant/tool messages with tool_calls
+- **compactions** — summaries of old context
+- **memories** — persistent memories with categories
+- **orchestration_runs** — subagent batches with status/duration
+- **subagent_runs** — individual tasks with full lifecycle
 
 ## Stack
 
-| Camada    | Tecnologia              |
+| Layer     | Technology              |
 | --------- | ----------------------- |
 | Runtime   | Node.js (ESM)           |
-| Linguagem | TypeScript              |
+| Language  | TypeScript              |
 | UI        | React 18 + Ink          |
-| Banco     | SQLite (better-sqlite3) |
+| Database  | SQLite (better-sqlite3) |
 | LLM       | Ollama                  |
-| Testes    | Vitest                  |
+| Tests     | Vitest                  |
