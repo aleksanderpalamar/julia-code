@@ -45,6 +45,17 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
   }
 }
 
+export function unregisterToolsByPrefix(prefix: string): number {
+  let count = 0;
+  for (const name of tools.keys()) {
+    if (name.startsWith(prefix)) {
+      tools.delete(name);
+      count++;
+    }
+  }
+  return count;
+}
+
 export function initTools(): void {
   registerTool(execTool);
   registerTool(readTool);

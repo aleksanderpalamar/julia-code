@@ -15,6 +15,16 @@ import {
   untrustAll,
   getTrustedDirectories,
 } from "../config/trust.js";
+import {
+  getMcpServerConfigs,
+  addMcpServerConfig,
+  removeMcpServerConfig,
+} from "../config/mcp.js";
+import {
+  getMcpServerStatuses,
+  addMcpServer,
+  removeMcpServer,
+} from "../mcp/manager.js";
 
 interface Props {
   sessionId?: string;
@@ -79,6 +89,58 @@ export function App({ sessionId }: Props) {
         if (path === projectDir) {
           setTrusted(false);
         }
+        return;
+      }
+
+      // /mcp commands
+      if (text === "/mcp" || text === "/mcp list") {
+        const configs = getMcpServerConfigs();
+        const statuses = getMcpServerStatuses();
+        const configNames = Object.keys(configs);
+
+        if (configNames.length === 0) {
+          addSystemEntry("No MCP servers configured.");
+          return;
+        }
+
+        const lines = configNames.map(name => {
+          const status = statuses.find(s => s.name === name);
+          const state = status?.connected ? `connected, ${status.toolCount} tools` : "disconnected";
+          return `  - ${name}: ${state}`;
+        });
+        addSystemEntry("MCP Servers:\n" + lines.join("\n"));
+        return;
+      }
+
+      if (text.startsWith("/mcp add ")) {
+        const parts = text.slice("/mcp add ".length).trim().split(/\s+/);
+        if (parts.length < 2) {
+          addSystemEntry("Usage: /mcp add <name> <command> [args...]");
+          return;
+        }
+        const [name, command, ...args] = parts;
+        const config = { command, args };
+        addMcpServerConfig(name, config);
+        addSystemEntry(`Adding MCP server '${name}'...`);
+        addMcpServer(name, config).then(result => {
+          if (result.success) {
+            addSystemEntry(`MCP server '${name}' connected: ${result.toolCount} tools registered.`);
+          } else {
+            addSystemEntry(`MCP server '${name}' failed to connect: ${result.error}`);
+          }
+        });
+        return;
+      }
+
+      if (text.startsWith("/mcp remove ")) {
+        const name = text.slice("/mcp remove ".length).trim();
+        if (!name) {
+          addSystemEntry("Usage: /mcp remove <name>");
+          return;
+        }
+        removeMcpServer(name);
+        removeMcpServerConfig(name);
+        addSystemEntry(`MCP server '${name}' removed.`);
         return;
       }
 

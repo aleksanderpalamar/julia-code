@@ -1,1 +1,1 @@
-export { initMcpServers, shutdownMcpServers } from './manager.js';
+export { initMcpServers, shutdownMcpServers, getMcpServerStatuses, addMcpServer, removeMcpServer } from './manager.js';
