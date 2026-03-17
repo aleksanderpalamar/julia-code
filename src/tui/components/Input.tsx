@@ -4,6 +4,8 @@ import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import { SlashMenu } from "./SlashMenu.js";
 import { filterCommands } from "../commands/registry.js";
+import type { AgentMode } from "../types.js";
+import { modeLabel, modeColor } from "../types.js";
 
 interface Props {
   onSubmit: (value: string) => void;
@@ -11,6 +13,7 @@ interface Props {
   model: string;
   isThinking: boolean;
   tokens?: number;
+  mode: AgentMode;
 }
 
 export function Input({
@@ -19,6 +22,7 @@ export function Input({
   model,
   isThinking,
   tokens,
+  mode,
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -45,7 +49,7 @@ export function Input({
         );
       }
 
-      if (key.tab) {
+      if (key.tab && !key.shift) {
         const cmd = filteredCommands[selectedIndex];
         if (cmd) {
           setValue(cmd.name + " ");
@@ -97,6 +101,12 @@ export function Input({
         <Text color="gray">
           {tokens ? `${tokens.toLocaleString()}tk` : "0tk"}{" "}
         </Text>
+        {mode !== 'normal' && (
+          <>
+            <Text color="gray"> | </Text>
+            <Text color={modeColor(mode)} bold>{modeLabel(mode)}</Text>
+          </>
+        )}
         <Text color="gray"> | </Text>
         {isThinking && (
           <>
@@ -106,7 +116,7 @@ export function Input({
             </Text>
           </>
         )}
-        <Text color="green" bold>
+        <Text color={modeColor(mode)} bold>
           {"❯ "}
         </Text>
         {disabled ? (

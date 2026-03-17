@@ -8,6 +8,8 @@ import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
 import { getConfig } from "../config/index.js";
 import { getProjectDir } from "../config/workspace.js";
+import { nextMode, modeLabel } from "./types.js";
+import type { AgentMode } from "./types.js";
 import {
   isDirectoryTrusted,
   trustDirectory,
@@ -38,6 +40,7 @@ export function App({ sessionId }: Props) {
   const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry } =
     useAgent(refreshSession);
   const model = getConfig().defaultModel;
+  const [mode, setMode] = useState<AgentMode>('normal');
 
   const handleTrust = useCallback(() => {
     trustDirectory(projectDir);
@@ -160,7 +163,16 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      sendMessage(session.id, text, model);
+      if (text === "/mode") {
+        setMode(prev => {
+          const n = nextMode(prev);
+          addSystemEntry(`Mode: ${modeLabel(n) || 'normal'}`);
+          return n;
+        });
+        return;
+      }
+
+      sendMessage(session.id, text, model, mode);
     },
     [session.id, model, sendMessage, exit, projectDir, addSystemEntry],
   );
@@ -168,6 +180,9 @@ export function App({ sessionId }: Props) {
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit();
+    }
+    if (key.shift && key.tab) {
+      setMode(prev => nextMode(prev));
     }
   });
 
@@ -188,6 +203,7 @@ export function App({ sessionId }: Props) {
         sessionId={session.id}
         isThinking={isThinking}
         tokens={session.total_tokens}
+        mode={mode}
       />
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <Chat entries={entries} streamingText={streamingText} />
@@ -199,6 +215,7 @@ export function App({ sessionId }: Props) {
           model={model}
           isThinking={isThinking}
           tokens={sessionTokens.promptTokens + sessionTokens.completionTokens}
+          mode={mode}
         />
       </Box>
     </Box>

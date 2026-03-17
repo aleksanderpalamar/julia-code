@@ -6,7 +6,7 @@ import { getProjectDir, getWorkspace } from '../config/workspace.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-export function buildContext(sessionId: string): ChatMessage[] {
+export function buildContext(sessionId: string, options?: { planMode?: boolean }): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const config = getConfig();
 
@@ -37,8 +37,18 @@ export function buildContext(sessionId: string): ChatMessage[] {
     ].join('\n');
   }
 
+  const planModeSection = options?.planMode ? [
+    `## Mode: Plan Mode`,
+    `You are in PLAN MODE. ONLY analyze, explore, and plan.`,
+    `- Read files, search, gather information — OK`,
+    `- Do NOT modify files or execute commands`,
+    `- Describe what changes you WOULD make, with file paths and code`,
+    `- Provide step-by-step plans`,
+  ].join('\n') : '';
+
   const systemContent = skills.map(s => s.content).join('\n\n---\n\n') + '\n\n---\n\n' + envInfo
-    + (memoriesSection ? '\n\n---\n\n' + memoriesSection : '');
+    + (memoriesSection ? '\n\n---\n\n' + memoriesSection : '')
+    + (planModeSection ? '\n\n---\n\n' + planModeSection : '');
   if (systemContent) {
     messages.push({ role: 'system', content: systemContent });
   }

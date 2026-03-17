@@ -4,6 +4,7 @@ const commands: SlashCommand[] = [
   { name: '/clear', description: 'Clear conversation history' },
   { name: '/trust', description: 'Manage trusted directories' },
   { name: '/mcp', description: 'Manage MCP servers' },
+  { name: '/mode', description: 'Cycle mode: Normal → Plan → Accept Edits (Shift+Tab)' },
   { name: '/quit', description: 'Exit JuliaAgent' },
 ];
 

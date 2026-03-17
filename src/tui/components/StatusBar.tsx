@@ -1,15 +1,18 @@
 import React from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
+import type { AgentMode } from "../types.js";
+import { modeLabel, modeColor } from "../types.js";
 
 interface Props {
   model: string;
   sessionId: string;
   isThinking: boolean;
   tokens: number;
+  mode: AgentMode;
 }
 
-export function StatusBar({ model, sessionId, isThinking, tokens }: Props) {
+export function StatusBar({ model, sessionId, isThinking, tokens, mode }: Props) {
   const shortId = sessionId.slice(0, 8);
   const cwd = process.cwd();
 
@@ -44,6 +47,12 @@ export function StatusBar({ model, sessionId, isThinking, tokens }: Props) {
             <Text color="gray">session: {shortId}</Text>
             <Text color="gray"> · </Text>
             <Text color="gray">{tokens.toLocaleString()} tokens</Text>
+            {mode !== 'normal' && (
+              <>
+                <Text color="gray"> · </Text>
+                <Text color={modeColor(mode)} bold>{modeLabel(mode)}</Text>
+              </>
+            )}
             {isThinking && (
               <>
                 <Text color="gray"> · </Text>

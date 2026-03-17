@@ -31,10 +31,19 @@ export interface AgentLoopOptions {
 export class AgentLoop extends EventEmitter<AgentEvents> {
   private running = false;
   private options: AgentLoopOptions;
+  private planMode = false;
 
   constructor(options?: AgentLoopOptions) {
     super();
     this.options = options ?? {};
+  }
+
+  setExcludeTools(tools: string[]): void {
+    this.options.excludeTools = tools;
+  }
+
+  setPlanMode(enabled: boolean): void {
+    this.planMode = enabled;
   }
 
   async run(sessionId: string, userMessage: string, model?: string): Promise<void> {
@@ -78,7 +87,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         this.emit('thinking');
 
         // Build context fresh each iteration
-        const messages = buildContext(sessionId);
+        const messages = buildContext(sessionId, { planMode: this.planMode });
 
         // Call LLM
         let fullText = '';
