@@ -4,6 +4,7 @@ interface QueueItem {
   sessionId: string;
   message: string;
   model?: string;
+  images?: string[];
   resolve: () => void;
   reject: (err: Error) => void;
 }
@@ -20,9 +21,9 @@ export class AgentQueue {
     this.agent = agent;
   }
 
-  enqueue(sessionId: string, message: string, model?: string): Promise<void> {
+  enqueue(sessionId: string, message: string, model?: string, images?: string[]): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const item: QueueItem = { sessionId, message, model, resolve, reject };
+      const item: QueueItem = { sessionId, message, model, images, resolve, reject };
 
       if (!this.queues.has(sessionId)) {
         this.queues.set(sessionId, []);
@@ -43,7 +44,7 @@ export class AgentQueue {
     this.running.add(sessionId);
 
     try {
-      await this.agent.run(item.sessionId, item.message, item.model);
+      await this.agent.run(item.sessionId, item.message, item.model, item.images);
       item.resolve();
     } catch (err) {
       item.reject(err instanceof Error ? err : new Error(String(err)));

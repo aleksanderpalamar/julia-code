@@ -18,6 +18,7 @@ export interface Message {
   content: string;
   tool_calls?: string | null;
   tool_call_id?: string | null;
+  images?: string | null;
   created_at: string;
 }
 
@@ -58,18 +59,20 @@ export function addMessage(
   role: Message['role'],
   content: string,
   toolCalls?: object[],
-  toolCallId?: string
+  toolCallId?: string,
+  images?: string[]
 ): Message {
   const db = getDb();
 
   db.prepare(
-    'INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, images) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(
     sessionId,
     role,
     content,
     toolCalls ? JSON.stringify(toolCalls) : null,
-    toolCallId ?? null
+    toolCallId ?? null,
+    images?.length ? JSON.stringify(images) : null
   );
 
   db.prepare(

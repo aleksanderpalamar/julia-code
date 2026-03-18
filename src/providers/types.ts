@@ -1,6 +1,7 @@
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  images?: string[];  // base64-encoded
   tool_calls?: ToolCall[];
   tool_call_id?: string;
 }

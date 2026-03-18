@@ -100,6 +100,12 @@ function initSchema(db: Database.Database): void {
   if (!columns.some(c => c.name === 'total_tokens')) {
     db.exec('ALTER TABLE sessions ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0');
   }
+
+  // Migration: add images column to messages if it doesn't exist
+  const msgCols = db.pragma('table_info(messages)') as Array<{ name: string }>;
+  if (!msgCols.some(c => c.name === 'images')) {
+    db.exec('ALTER TABLE messages ADD COLUMN images TEXT');
+  }
 }
 
 export function closeDb(): void {

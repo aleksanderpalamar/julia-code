@@ -1,4 +1,6 @@
 import React, { useCallback, useState } from "react";
+import { readFileSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { Box, useApp, useInput } from "ink";
 import { Chat } from "./components/Chat.js";
 import { Input } from "./components/Input.js";
@@ -6,6 +8,7 @@ import { StatusBar } from "./components/StatusBar.js";
 import { TrustPrompt } from "./components/TrustPrompt.js";
 import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
+import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
 import { getConfig } from "../config/index.js";
 import { getProjectDir } from "../config/workspace.js";
 import { nextMode, modeLabel } from "./types.js";
@@ -41,6 +44,18 @@ export function App({ sessionId }: Props) {
     useAgent(refreshSession);
   const model = getConfig().defaultModel;
   const [mode, setMode] = useState<AgentMode>('normal');
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingImageNames, setPendingImageNames] = useState<string[]>([]);
+
+  const { pasteInProgress } = useClipboardPaste({
+    onImagePasted: (base64, name) => {
+      setPendingImages(prev => [...prev, base64]);
+      setPendingImageNames(prev => [...prev, name]);
+      addSystemEntry(`[Image #${pendingImages.length + 1}] pasted from clipboard`);
+    },
+    onError: (msg) => addSystemEntry(`Clipboard error: ${msg}`),
+    disabled: isThinking,
+  });
 
   const handleTrust = useCallback(() => {
     trustDirectory(projectDir);
@@ -172,7 +187,67 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      sendMessage(session.id, text, model, mode);
+      // /image commands
+      if (text === "/image list") {
+        if (pendingImageNames.length === 0) {
+          addSystemEntry("No images attached.");
+        } else {
+          const lines = pendingImageNames.map((name, i) => `  [Image #${i + 1}] ${name}`);
+          addSystemEntry("Pending images:\n" + lines.join("\n"));
+        }
+        return;
+      }
+
+      if (text === "/image clear") {
+        setPendingImages([]);
+        setPendingImageNames([]);
+        addSystemEntry("All pending images cleared.");
+        return;
+      }
+
+      if (text.startsWith("/image ")) {
+        const imgPath = text.slice("/image ".length).trim();
+        if (!imgPath) {
+          addSystemEntry("Usage: /image <path> | list | clear");
+          return;
+        }
+        try {
+          const VALID_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+          const resolved = resolve(imgPath);
+          const ext = resolved.toLowerCase().slice(resolved.lastIndexOf('.'));
+          if (!VALID_EXTENSIONS.includes(ext)) {
+            addSystemEntry(`Invalid image format '${ext}'. Supported: ${VALID_EXTENSIONS.join(', ')}`);
+            return;
+          }
+          const stat = statSync(resolved);
+          const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+          if (stat.size > MAX_SIZE) {
+            addSystemEntry(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max: 10MB`);
+            return;
+          }
+          const base64 = readFileSync(resolved).toString('base64');
+          const fileName = resolved.split('/').pop() ?? imgPath;
+          setPendingImages(prev => [...prev, base64]);
+          setPendingImageNames(prev => [...prev, fileName]);
+          const count = pendingImages.length + 1;
+          addSystemEntry(`[Image #${count}] attached: ${fileName}`);
+        } catch (err) {
+          addSystemEntry(`Failed to read image: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+
+      if (text === "/image") {
+        addSystemEntry("Usage: /image <path> | list | clear");
+        return;
+      }
+
+      const imagesToSend = pendingImages.length > 0 ? [...pendingImages] : undefined;
+      if (imagesToSend) {
+        setPendingImages([]);
+        setPendingImageNames([]);
+      }
+      sendMessage(session.id, text, model, mode, imagesToSend);
     },
     [session.id, model, sendMessage, exit, projectDir, addSystemEntry],
   );
@@ -216,6 +291,8 @@ export function App({ sessionId }: Props) {
           isThinking={isThinking}
           tokens={sessionTokens.promptTokens + sessionTokens.completionTokens}
           mode={mode}
+          pendingImageCount={pendingImages.length}
+          pasteInProgress={pasteInProgress}
         />
       </Box>
     </Box>

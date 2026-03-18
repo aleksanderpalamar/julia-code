@@ -46,7 +46,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     this.planMode = enabled;
   }
 
-  async run(sessionId: string, userMessage: string, model?: string): Promise<void> {
+  async run(sessionId: string, userMessage: string, model?: string, images?: string[]): Promise<void> {
     if (this.running) {
       this.emit('error', 'Agent is already running');
       return;
@@ -66,7 +66,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
     try {
       // Save user message
-      addMessage(sessionId, 'user', userMessage);
+      addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
 
       // Auto-orchestrate: analyze complexity and spawn subagents if needed
       if (config.acpEnabled && config.acpAutoOrchestrate && !this.options.excludeTools?.includes('subagent')) {

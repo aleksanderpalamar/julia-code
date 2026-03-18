@@ -131,6 +131,14 @@ function dbMessageToChatMessage(msg: Message): ChatMessage {
     chatMsg.tool_call_id = msg.tool_call_id;
   }
 
+  if (msg.images) {
+    try {
+      chatMsg.images = JSON.parse(msg.images);
+    } catch {
+      // ignore malformed images
+    }
+  }
+
   return chatMsg;
 }
 

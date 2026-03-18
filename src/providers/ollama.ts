@@ -122,6 +122,10 @@ function formatMessage(msg: ChatMessage): Record<string, unknown> {
     content: msg.content,
   };
 
+  if (msg.images?.length) {
+    formatted.images = msg.images;
+  }
+
   if (msg.tool_calls?.length) {
     formatted.tool_calls = msg.tool_calls.map(tc => ({
       function: {

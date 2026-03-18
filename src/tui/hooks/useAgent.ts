@@ -114,7 +114,7 @@ export function useAgent(onSessionChanged?: () => void) {
   }, [agent]);
 
   const sendMessage = useCallback(
-    (sessionId: string, message: string, model?: string, mode?: AgentMode) => {
+    (sessionId: string, message: string, model?: string, mode?: AgentMode, images?: string[]) => {
       const agent = queueRef.current!.getAgent();
       if (mode === 'plan') {
         agent.setExcludeTools(WRITE_TOOLS);
@@ -123,8 +123,12 @@ export function useAgent(onSessionChanged?: () => void) {
         agent.setExcludeTools([]);
         agent.setPlanMode(false);
       }
-      setEntries(e => [...e, { type: 'user', content: message }]);
-      queueRef.current!.enqueue(sessionId, message, model);
+      const imageCount = images?.length ?? 0;
+      const userContent = imageCount > 0
+        ? `${Array.from({ length: imageCount }, (_, i) => `[Image #${i + 1}]`).join(' ')} ${message}`
+        : message;
+      setEntries(e => [...e, { type: 'user', content: userContent }]);
+      queueRef.current!.enqueue(sessionId, message, model, images);
     },
     []
   );
