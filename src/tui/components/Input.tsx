@@ -14,6 +14,8 @@ interface Props {
   isThinking: boolean;
   tokens?: number;
   mode: AgentMode;
+  pendingImageCount?: number;
+  pasteInProgress?: React.MutableRefObject<boolean>;
 }
 
 export function Input({
@@ -23,6 +25,8 @@ export function Input({
   isThinking,
   tokens,
   mode,
+  pendingImageCount,
+  pasteInProgress,
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -66,8 +70,18 @@ export function Input({
   );
 
   const handleChange = (newValue: string) => {
-    setValue(newValue);
-    setSelectedIndex(0);
+    if (pasteInProgress?.current) {
+      pasteInProgress.current = false;
+      // Suppress the spurious 'v' that ink-text-input inserts on Ctrl+V
+      // (it doesn't filter ctrl+v like it does ctrl+c)
+      return;
+    }
+    // Also filter out any stray U+0016 (Ctrl+V raw char) that might leak through
+    const cleaned = newValue.replace(/\x16/g, '');
+    if (cleaned !== value) {
+      setValue(cleaned);
+      setSelectedIndex(0);
+    }
   };
 
   const handleSubmit = (text: string) => {
@@ -105,6 +119,12 @@ export function Input({
           <>
             <Text color="gray"> | </Text>
             <Text color={modeColor(mode)} bold>{modeLabel(mode)}</Text>
+          </>
+        )}
+        {(pendingImageCount ?? 0) > 0 && (
+          <>
+            <Text color="gray"> | </Text>
+            <Text color="cyan" bold>[{pendingImageCount} img]</Text>
           </>
         )}
         <Text color="gray"> | </Text>
