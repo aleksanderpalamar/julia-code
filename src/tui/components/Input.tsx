@@ -6,6 +6,8 @@ import { SlashMenu } from "./SlashMenu.js";
 import { filterCommands } from "../commands/registry.js";
 import type { AgentMode } from "../types.js";
 import { modeLabel, modeColor } from "../types.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import { getBreakpoint } from "../responsive.js";
 
 interface Props {
   onSubmit: (value: string) => void;
@@ -30,6 +32,8 @@ export function Input({
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const { columns } = useTerminalSize();
+  const bp = getBreakpoint(columns);
 
   const showMenu = value.startsWith("/") && !value.includes(" ");
   const filteredCommands = useMemo(
@@ -72,11 +76,8 @@ export function Input({
   const handleChange = (newValue: string) => {
     if (pasteInProgress?.current) {
       pasteInProgress.current = false;
-      // Suppress the spurious 'v' that ink-text-input inserts on Ctrl+V
-      // (it doesn't filter ctrl+v like it does ctrl+c)
       return;
     }
-    // Also filter out any stray U+0016 (Ctrl+V raw char) that might leak through
     const cleaned = newValue.replace(/\x16/g, '');
     if (cleaned !== value) {
       setValue(cleaned);
@@ -88,7 +89,6 @@ export function Input({
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    // If menu is showing and user presses Enter, select the command
     if (showMenu && filteredCommands.length > 0) {
       const cmd = filteredCommands[selectedIndex];
       if (cmd) {
@@ -104,17 +104,33 @@ export function Input({
     onSubmit(trimmed);
   };
 
+  const displayModel = bp === 'narrow'
+    ? null
+    : bp === 'medium' && model.length > 20
+      ? model.slice(0, 17) + '...'
+      : model;
+
+  const showTokens = bp !== 'narrow';
+
   return (
     <Box flexDirection="column">
       {showMenu && filteredCommands.length > 0 && (
         <SlashMenu commands={filteredCommands} selectedIndex={selectedIndex} />
       )}
       <Box>
-        <Text color="yellow">{model}</Text>
-        <Text color="gray"> | </Text>
-        <Text color="gray">
-          {tokens ? `${tokens.toLocaleString()}tk` : "0tk"}{" "}
-        </Text>
+        {displayModel && (
+          <>
+            <Text color="yellow">{displayModel}</Text>
+            <Text color="gray"> | </Text>
+          </>
+        )}
+        {showTokens && (
+          <>
+            <Text color="gray">
+              {tokens ? `${tokens.toLocaleString()}tk` : "0tk"}{" "}
+            </Text>
+          </>
+        )}
         {mode !== 'normal' && (
           <>
             <Text color="gray"> | </Text>
@@ -127,7 +143,6 @@ export function Input({
             <Text color="cyan" bold>[{pendingImageCount} img]</Text>
           </>
         )}
-        <Text color="gray"> | </Text>
         {isThinking && (
           <>
             <Text color="gray"> | </Text>
@@ -136,6 +151,7 @@ export function Input({
             </Text>
           </>
         )}
+        <Text color="gray"> | </Text>
         <Text color={modeColor(mode)} bold>
           {"❯ "}
         </Text>

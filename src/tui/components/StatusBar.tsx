@@ -3,6 +3,8 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import type { AgentMode } from "../types.js";
 import { modeLabel, modeColor } from "../types.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import { getBreakpoint } from "../responsive.js";
 
 interface Props {
   model: string;
@@ -15,6 +17,11 @@ interface Props {
 export function StatusBar({ model, sessionId, isThinking, tokens, mode }: Props) {
   const shortId = sessionId.slice(0, 8);
   const cwd = process.cwd();
+  const { columns } = useTerminalSize();
+  const bp = getBreakpoint(columns);
+
+  const isWide = bp === 'wide';
+  const isNarrow = bp === 'narrow';
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -25,20 +32,36 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode }: Props)
         <Text color="gray"> v0.1.0</Text>
       </Box>
 
-      <Box borderStyle="round" borderColor="gray" paddingX={1} paddingY={1}>
+      <Box
+        borderStyle="round"
+        borderColor="gray"
+        paddingX={1}
+        paddingY={1}
+        flexDirection={isWide ? 'row' : 'column'}
+      >
         {/* Left panel: Logo + info */}
-        <Box flexDirection="column" width="50%">
-          <Box>
-            <Text color="cyan" bold>{"  ╦╦ ╦╦  ╦╔═╗"}</Text>
-          </Box>
-          <Box>
-            <Text color="cyan" bold>{"  ║║ ║║  ║╠═╣"}</Text>
-            <Text>  </Text>
-            <Text color="white" bold>Welcome back!</Text>
-          </Box>
-          <Box>
-            <Text color="cyan" bold>{" ╚╝╚═╝╩═╝╩╩ ╩"}</Text>
-          </Box>
+        <Box flexDirection="column" width={isWide ? "50%" : undefined}>
+          {isNarrow ? (
+            <Box>
+              <Text color="cyan" bold>JULIA</Text>
+              <Text>  </Text>
+              <Text color="white" bold>Welcome back!</Text>
+            </Box>
+          ) : (
+            <>
+              <Box>
+                <Text color="cyan" bold>{"  ╦╦ ╦╦  ╦╔═╗"}</Text>
+              </Box>
+              <Box>
+                <Text color="cyan" bold>{"  ║║ ║║  ║╠═╣"}</Text>
+                <Text>  </Text>
+                <Text color="white" bold>Welcome back!</Text>
+              </Box>
+              <Box>
+                <Text color="cyan" bold>{" ╚╝╚═╝╩═╝╩╩ ╩"}</Text>
+              </Box>
+            </>
+          )}
 
           <Box marginTop={1}>
             <Text>    </Text>
@@ -70,7 +93,12 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode }: Props)
         </Box>
 
         {/* Right panel: Tips + Recent activity */}
-        <Box flexDirection="column" width="50%" paddingLeft={2}>
+        <Box
+          flexDirection="column"
+          width={isWide ? "50%" : undefined}
+          paddingLeft={isWide ? 2 : 0}
+          marginTop={isWide ? 0 : 1}
+        >
           <Box>
             <Text color="yellow" bold>Tips for getting started</Text>
           </Box>
