@@ -249,7 +249,7 @@ export function App({ sessionId }: Props) {
       }
       sendMessage(session.id, text, model, mode, imagesToSend);
     },
-    [session.id, model, sendMessage, exit, projectDir, addSystemEntry],
+    [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames],
   );
 
   useInput((input, key) => {
