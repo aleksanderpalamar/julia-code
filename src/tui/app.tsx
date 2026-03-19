@@ -6,6 +6,7 @@ import { Chat } from "./components/Chat.js";
 import { Input } from "./components/Input.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { TrustPrompt } from "./components/TrustPrompt.js";
+import { ApprovalPrompt, summarizeArgs } from "./components/ApprovalPrompt.js";
 import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
 import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
@@ -40,7 +41,7 @@ export function App({ sessionId }: Props) {
   const projectDir = getProjectDir();
   const [trusted, setTrusted] = useState(() => isDirectoryTrusted(projectDir));
   const { session, refreshSession } = useSession(sessionId);
-  const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry } =
+  const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, pendingApproval, resolveApproval } =
     useAgent(refreshSession);
   const model = getConfig().defaultModel;
   const [mode, setMode] = useState<AgentMode>('normal');
@@ -307,10 +308,19 @@ export function App({ sessionId }: Props) {
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <Chat entries={entries} streamingText={streamingText} />
       </Box>
+      {pendingApproval && (
+        <Box paddingX={1}>
+          <ApprovalPrompt
+            toolName={pendingApproval.toolName}
+            argsSummary={summarizeArgs(pendingApproval.toolName, pendingApproval.args)}
+            onResult={resolveApproval}
+          />
+        </Box>
+      )}
       <Box paddingX={1} paddingY={0}>
         <Input
           onSubmit={handleSubmit}
-          disabled={isThinking}
+          disabled={isThinking || pendingApproval !== null}
           model={model}
           isThinking={isThinking}
           tokens={sessionTokens.promptTokens + sessionTokens.completionTokens}
