@@ -103,7 +103,12 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         this.emit('thinking');
 
         // Build context fresh each iteration
-        const messages = buildContext(sessionId, { planMode: this.planMode, temperament: this.temperament });
+        const messages = buildContext(sessionId, {
+          planMode: this.planMode,
+          temperament: this.temperament,
+          iteration: iterations,
+          maxIterations,
+        });
 
         // Call LLM
         let fullText = '';

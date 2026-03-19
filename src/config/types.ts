@@ -3,16 +3,16 @@ import { z } from 'zod';
 export const ConfigSchema = z.object({
   ollamaHost: z.string().default('http://localhost:11434'),
   defaultModel: z.string().default('qwen3:8b'),
-  maxToolIterations: z.number().default(10),
+  maxToolIterations: z.number().default(25),
   dbPath: z.string().default('./data/julia.db'),
   compactionThreshold: z.number().default(6000),   // estimated tokens before triggering compaction
   compactionKeepRecent: z.number().default(6),      // number of recent messages to keep uncompacted
   workspace: z.string().default(''),                // workspace root (empty = cwd)
   // ACP — subagent coordination
-  acpEnabled: z.boolean().default(false),
-  acpAutoOrchestrate: z.boolean().default(false),  // auto-detect complex tasks and spawn subagents
+  acpEnabled: z.boolean().default(true),
+  acpAutoOrchestrate: z.boolean().default(true),  // auto-detect complex tasks and spawn subagents
   acpMaxConcurrent: z.number().default(3),
-  acpSubagentMaxIterations: z.number().default(15),
+  acpSubagentMaxIterations: z.number().default(20),
   acpDefaultModel: z.string().nullable().default(null),
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
 });
@@ -45,7 +45,7 @@ export const SettingsSchema = z.object({
     available: z.array(SettingsModelSchema).default([]),
   }).optional(),
   agent: z.object({
-    maxToolIterations: z.number().default(10),
+    maxToolIterations: z.number().default(25),
   }).optional(),
   session: z.object({
     compactionThreshold: z.number().default(6000),
@@ -57,8 +57,8 @@ export const SettingsSchema = z.object({
   workspace: z.string().optional(),
   trustedDirectories: z.array(z.string()).optional(),
   acp: z.object({
-    enabled: z.boolean().default(false),
-    autoOrchestrate: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    autoOrchestrate: z.boolean().default(true),
     maxConcurrent: z.number().default(3),
     subagentMaxIterations: z.number().default(15),
     defaultModel: z.string().nullable().default(null),

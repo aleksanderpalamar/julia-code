@@ -6,7 +6,7 @@ import { getProjectDir, getWorkspace } from '../config/workspace.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-export function buildContext(sessionId: string, options?: { planMode?: boolean; temperament?: string }): ChatMessage[] {
+export function buildContext(sessionId: string, options?: { planMode?: boolean; temperament?: string; iteration?: number; maxIterations?: number }): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const config = getConfig();
 
@@ -61,11 +61,20 @@ export function buildContext(sessionId: string, options?: { planMode?: boolean; 
       ].join('\n\n')
     : '';
 
+  const iterationSection = (options?.iteration != null && options?.maxIterations != null) ? [
+    `## Iteration Awareness`,
+    `You are on iteration ${options.iteration} of ${options.maxIterations}.`,
+    options.iteration >= options.maxIterations * 0.6
+      ? `⚠️ You are running low on iterations. If significant work remains, use the subagent tool to delegate remaining tasks in parallel.`
+      : `You have sufficient iterations remaining.`,
+  ].join('\n') : '';
+
   const systemContent = skills.map(s => s.content).join('\n\n---\n\n')
     + (temperamentSkill ? '\n\n---\n\n' + temperamentSkill.content : '')
     + '\n\n---\n\n' + envInfo
     + (memoriesSection ? '\n\n---\n\n' + memoriesSection : '')
     + (planModeSection ? '\n\n---\n\n' + planModeSection : '')
+    + (iterationSection ? '\n\n---\n\n' + iterationSection : '')
     + (userSkillsSection ? '\n\n---\n\n' + userSkillsSection : '');
   if (systemContent) {
     messages.push({ role: 'system', content: systemContent });

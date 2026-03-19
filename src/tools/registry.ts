@@ -12,7 +12,7 @@ import { fetchTool } from './fetch.js';
 import { sessionsTool } from './sessions.js';
 import { memoryTool } from './memory.js';
 import { subagentTool } from './subagent.js';
-import { getConfig } from '../config/index.js';
+
 
 const tools = new Map<string, ToolDefinition>();
 
@@ -67,7 +67,5 @@ export function initTools(): void {
   registerTool(sessionsTool);
   registerTool(memoryTool);
 
-  if (getConfig().acpEnabled) {
-    registerTool(subagentTool);
-  }
+  registerTool(subagentTool);
 }
