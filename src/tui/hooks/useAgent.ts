@@ -3,7 +3,7 @@ import { AgentLoop } from '../../agent/loop.js';
 import { AgentQueue } from '../../agent/queue.js';
 import type { ChatEntry } from '../components/Chat.js';
 import type { TokenUsage } from '../../providers/types.js';
-import type { AgentMode } from '../types.js';
+import type { AgentMode, Temperament } from '../types.js';
 import { WRITE_TOOLS } from '../types.js';
 
 export function useAgent(onSessionChanged?: () => void) {
@@ -114,7 +114,7 @@ export function useAgent(onSessionChanged?: () => void) {
   }, [agent]);
 
   const sendMessage = useCallback(
-    (sessionId: string, message: string, model?: string, mode?: AgentMode, images?: string[]) => {
+    (sessionId: string, message: string, model?: string, mode?: AgentMode, images?: string[], temperament?: Temperament) => {
       const agent = queueRef.current!.getAgent();
       if (mode === 'plan') {
         agent.setExcludeTools(WRITE_TOOLS);
@@ -123,6 +123,7 @@ export function useAgent(onSessionChanged?: () => void) {
         agent.setExcludeTools([]);
         agent.setPlanMode(false);
       }
+      agent.setTemperament(temperament ?? 'neutral');
       const imageCount = images?.length ?? 0;
       const userContent = imageCount > 0
         ? `${Array.from({ length: imageCount }, (_, i) => `[Image #${i + 1}]`).join(' ')} ${message}`

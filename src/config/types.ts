@@ -14,6 +14,7 @@ export const ConfigSchema = z.object({
   acpMaxConcurrent: z.number().default(3),
   acpSubagentMaxIterations: z.number().default(15),
   acpDefaultModel: z.string().nullable().default(null),
+  defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -61,6 +62,9 @@ export const SettingsSchema = z.object({
     maxConcurrent: z.number().default(3),
     subagentMaxIterations: z.number().default(15),
     defaultModel: z.string().nullable().default(null),
+  }).optional(),
+  temperament: z.object({
+    default: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   }).optional(),
   mcpServers: z.record(McpServerConfigSchema).optional(),
 });

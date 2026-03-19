@@ -19,6 +19,15 @@ export function loadSkills(): Skill[] {
   return skills;
 }
 
+export function loadTemperamentSkill(temperament: string): Skill | null {
+  const TEMPERAMENTS_DIR = new URL('temperaments/', import.meta.url).pathname;
+  const filePath = join(TEMPERAMENTS_DIR, `${temperament}.md`);
+  if (!existsSync(filePath)) return null;
+  const content = readFileSync(filePath, 'utf-8');
+  if (!content.trim()) return null;
+  return { name: `temperament-${temperament}`, content };
+}
+
 function loadFromDir(dir: string): Skill[] {
   const skills: Skill[] = [];
   if (!existsSync(dir)) return skills;

@@ -25,3 +25,28 @@ export function modeColor(mode: AgentMode): string {
     case 'accept-edits': return 'red';
   }
 }
+
+export type Temperament = 'neutral' | 'sharp' | 'warm' | 'auto';
+
+export function nextTemperament(current: Temperament): Temperament {
+  const order: Temperament[] = ['neutral', 'sharp', 'warm', 'auto'];
+  return order[(order.indexOf(current) + 1) % order.length];
+}
+
+export function temperamentLabel(t: Temperament): string {
+  switch (t) {
+    case 'neutral': return '';
+    case 'sharp': return '⚡ sharp';
+    case 'warm': return '☀ warm';
+    case 'auto': return '🔄 auto';
+  }
+}
+
+export function temperamentColor(t: Temperament): string {
+  switch (t) {
+    case 'neutral': return 'gray';
+    case 'sharp': return 'red';
+    case 'warm': return 'yellow';
+    case 'auto': return 'magenta';
+  }
+}

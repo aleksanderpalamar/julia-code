@@ -11,8 +11,8 @@ import { useAgent } from "./hooks/useAgent.js";
 import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
 import { getConfig } from "../config/index.js";
 import { getProjectDir } from "../config/workspace.js";
-import { nextMode, modeLabel } from "./types.js";
-import type { AgentMode } from "./types.js";
+import { nextMode, modeLabel, nextTemperament, temperamentLabel } from "./types.js";
+import type { AgentMode, Temperament } from "./types.js";
 import {
   isDirectoryTrusted,
   trustDirectory,
@@ -44,6 +44,7 @@ export function App({ sessionId }: Props) {
     useAgent(refreshSession);
   const model = getConfig().defaultModel;
   const [mode, setMode] = useState<AgentMode>('normal');
+  const [temperament, setTemperament] = useState<Temperament>(() => getConfig().defaultTemperament as Temperament);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [pendingImageNames, setPendingImageNames] = useState<string[]>([]);
 
@@ -178,6 +179,28 @@ export function App({ sessionId }: Props) {
         return;
       }
 
+      // /temperament commands
+      if (text === "/temperament") {
+        setTemperament(prev => {
+          const n = nextTemperament(prev);
+          addSystemEntry(`Temperament: ${temperamentLabel(n) || 'neutral'}`);
+          return n;
+        });
+        return;
+      }
+
+      if (text.startsWith("/temperament ")) {
+        const value = text.slice("/temperament ".length).trim().toLowerCase();
+        const valid: Temperament[] = ['neutral', 'sharp', 'warm', 'auto'];
+        if (!valid.includes(value as Temperament)) {
+          addSystemEntry(`Invalid temperament '${value}'. Valid: ${valid.join(', ')}`);
+          return;
+        }
+        setTemperament(value as Temperament);
+        addSystemEntry(`Temperament: ${temperamentLabel(value as Temperament) || 'neutral'}`);
+        return;
+      }
+
       if (text === "/mode") {
         setMode(prev => {
           const n = nextMode(prev);
@@ -247,9 +270,9 @@ export function App({ sessionId }: Props) {
         setPendingImages([]);
         setPendingImageNames([]);
       }
-      sendMessage(session.id, text, model, mode, imagesToSend);
+      sendMessage(session.id, text, model, mode, imagesToSend, temperament);
     },
-    [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames],
+    [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames, temperament],
   );
 
   useInput((input, key) => {
@@ -279,6 +302,7 @@ export function App({ sessionId }: Props) {
         isThinking={isThinking}
         tokens={session.total_tokens}
         mode={mode}
+        temperament={temperament}
       />
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <Chat entries={entries} streamingText={streamingText} />

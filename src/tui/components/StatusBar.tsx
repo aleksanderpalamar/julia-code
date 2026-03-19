@@ -1,8 +1,8 @@
 import React from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
-import type { AgentMode } from "../types.js";
-import { modeLabel, modeColor } from "../types.js";
+import type { AgentMode, Temperament } from "../types.js";
+import { modeLabel, modeColor, temperamentLabel, temperamentColor } from "../types.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { getBreakpoint } from "../responsive.js";
 
@@ -12,9 +12,10 @@ interface Props {
   isThinking: boolean;
   tokens: number;
   mode: AgentMode;
+  temperament: Temperament;
 }
 
-export function StatusBar({ model, sessionId, isThinking, tokens, mode }: Props) {
+export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperament }: Props) {
   const shortId = sessionId.slice(0, 8);
   const cwd = process.cwd();
   const { columns } = useTerminalSize();
@@ -74,6 +75,12 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode }: Props)
               <>
                 <Text color="gray"> · </Text>
                 <Text color={modeColor(mode)} bold>{modeLabel(mode)}</Text>
+              </>
+            )}
+            {temperament !== 'neutral' && (
+              <>
+                <Text color="gray"> · </Text>
+                <Text color={temperamentColor(temperament)} bold>{temperamentLabel(temperament)}</Text>
               </>
             )}
             {isThinking && (

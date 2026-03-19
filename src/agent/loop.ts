@@ -32,6 +32,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   private running = false;
   private options: AgentLoopOptions;
   private planMode = false;
+  private temperament = 'neutral';
 
   constructor(options?: AgentLoopOptions) {
     super();
@@ -44,6 +45,10 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
   setPlanMode(enabled: boolean): void {
     this.planMode = enabled;
+  }
+
+  setTemperament(t: string): void {
+    this.temperament = t;
   }
 
   async run(sessionId: string, userMessage: string, model?: string, images?: string[]): Promise<void> {
@@ -87,7 +92,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         this.emit('thinking');
 
         // Build context fresh each iteration
-        const messages = buildContext(sessionId, { planMode: this.planMode });
+        const messages = buildContext(sessionId, { planMode: this.planMode, temperament: this.temperament });
 
         // Call LLM
         let fullText = '';

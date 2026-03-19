@@ -1,12 +1,12 @@
 import type { ChatMessage } from '../providers/types.js';
 import { getMessages, getLatestCompaction, getRecentMemories, type Message } from '../session/manager.js';
-import { loadSkills } from '../skills/loader.js';
+import { loadSkills, loadTemperamentSkill } from '../skills/loader.js';
 import { getConfig } from '../config/index.js';
 import { getProjectDir, getWorkspace } from '../config/workspace.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-export function buildContext(sessionId: string, options?: { planMode?: boolean }): ChatMessage[] {
+export function buildContext(sessionId: string, options?: { planMode?: boolean; temperament?: string }): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const config = getConfig();
 
@@ -46,7 +46,13 @@ export function buildContext(sessionId: string, options?: { planMode?: boolean }
     `- Provide step-by-step plans`,
   ].join('\n') : '';
 
-  const systemContent = skills.map(s => s.content).join('\n\n---\n\n') + '\n\n---\n\n' + envInfo
+  const temperamentSkill = options?.temperament && options.temperament !== 'neutral'
+    ? loadTemperamentSkill(options.temperament)
+    : null;
+
+  const systemContent = skills.map(s => s.content).join('\n\n---\n\n')
+    + (temperamentSkill ? '\n\n---\n\n' + temperamentSkill.content : '')
+    + '\n\n---\n\n' + envInfo
     + (memoriesSection ? '\n\n---\n\n' + memoriesSection : '')
     + (planModeSection ? '\n\n---\n\n' + planModeSection : '');
   if (systemContent) {

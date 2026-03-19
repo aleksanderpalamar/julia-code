@@ -64,6 +64,7 @@ export function loadConfig(): Config {
     acpMaxConcurrent: settings?.acp?.maxConcurrent,
     acpSubagentMaxIterations: settings?.acp?.subagentMaxIterations,
     acpDefaultModel: settings?.acp?.defaultModel,
+    defaultTemperament: settings?.temperament?.default,
   });
 
   // Resolve relative dbPath against ~/.juliacode/ instead of cwd

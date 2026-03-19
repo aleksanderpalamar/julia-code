@@ -6,6 +6,7 @@ const commands: SlashCommand[] = [
   { name: '/mcp', description: 'Manage MCP servers' },
   { name: '/image', description: 'Attach image: /image <path> | list | clear' },
   { name: '/mode', description: 'Cycle mode: Normal → Plan → Accept Edits (Shift+Tab)' },
+  { name: '/temperament', description: 'Set temperament: neutral | sharp | warm | auto' },
   { name: '/quit', description: 'Exit JuliaAgent' },
 ];
 
