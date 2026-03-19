@@ -1,7 +1,6 @@
-import { execSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import type { ToolDefinition } from './types.js';
-import { resolveInProject } from '../config/workspace.js';
+import { validateReadPath } from '../security/paths.js';
 
 export const grepTool: ToolDefinition = {
   name: 'grep',
@@ -31,18 +30,36 @@ export const grepTool: ToolDefinition = {
 
   async execute(args) {
     const pattern = args.pattern as string;
-    const searchPath = resolveInProject((args.path as string) || '.');
-    const ignoreCase = (args.ignore_case as boolean) ? '-i' : '';
-    const includeGlob = (args.glob as string) ? `--include='${args.glob}'` : '';
+    const searchPath = validateReadPath((args.path as string) || '.');
+    const ignoreCase = args.ignore_case as boolean;
+    const glob = args.glob as string | undefined;
+
+    // Build args array — no shell interpolation, no injection possible
+    const grepArgs: string[] = ['-rn'];
+    if (ignoreCase) grepArgs.push('-i');
+    if (glob) grepArgs.push(`--include=${glob}`);
+    grepArgs.push('--', pattern, searchPath);
 
     try {
-      const output = execSync(
-        `grep -rn ${ignoreCase} ${includeGlob} -- ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null | head -100`,
-        { encoding: 'utf-8', timeout: 15000, shell: '/bin/bash' }
-      ).trim();
+      const output = execFileSync('grep', grepArgs, {
+        encoding: 'utf-8',
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+      }).trim();
 
-      return { success: true, output: output || 'No matches found.' };
-    } catch {
+      // Limit output lines
+      const lines = output.split('\n');
+      const limited = lines.slice(0, 100);
+      const result = limited.join('\n')
+        + (lines.length > 100 ? `\n... (${lines.length - 100} more matches)` : '');
+
+      return { success: true, output: result || 'No matches found.' };
+    } catch (err: unknown) {
+      // grep exits with code 1 when no matches found — not an error
+      const e = err as { status?: number; stdout?: string };
+      if (e.status === 1) {
+        return { success: true, output: 'No matches found.' };
+      }
       return { success: true, output: 'No matches found.' };
     }
   },

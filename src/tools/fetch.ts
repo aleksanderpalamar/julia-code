@@ -1,4 +1,6 @@
 import type { ToolDefinition } from './types.js';
+import { wrapExternalContent } from '../security/boundaries.js';
+import { validateUrl } from '../security/network.js';
 
 export const fetchTool: ToolDefinition = {
   name: 'fetch',
@@ -37,6 +39,17 @@ export const fetchTool: ToolDefinition = {
     const body = args.body as string | undefined;
     const maxLength = (args.max_length as number) ?? 20000;
 
+    // Security: validate URL against SSRF blocklist
+    try {
+      validateUrl(url);
+    } catch (err) {
+      return {
+        success: false,
+        output: '',
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
@@ -68,9 +81,12 @@ export const fetchTool: ToolDefinition = {
 
       const statusInfo = `HTTP ${res.status} ${res.statusText}`;
 
+      // Wrap external content with isolation markers
+      const wrappedContent = wrapExternalContent(url, `${statusInfo}\n\n${text.trim()}`);
+
       return {
         success: res.ok,
-        output: `${statusInfo}\n\n${text.trim()}`,
+        output: wrappedContent,
         error: res.ok ? undefined : statusInfo,
       };
     } catch (err) {

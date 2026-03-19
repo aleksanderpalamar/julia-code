@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { ToolDefinition } from './types.js';
-import { resolveInProject } from '../config/workspace.js';
+import { validateReadPath } from '../security/paths.js';
 
 export const readTool: ToolDefinition = {
   name: 'read',
@@ -10,7 +10,7 @@ export const readTool: ToolDefinition = {
     properties: {
       path: {
         type: 'string',
-        description: 'Path to the file to read (absolute or relative to cwd)',
+        description: 'Path to the file to read (relative to project directory)',
       },
       offset: {
         type: 'number',
@@ -25,7 +25,7 @@ export const readTool: ToolDefinition = {
   },
 
   async execute(args) {
-    const filePath = resolveInProject(args.path as string);
+    const filePath = validateReadPath(args.path as string);
 
     try {
       const content = readFileSync(filePath, 'utf-8');

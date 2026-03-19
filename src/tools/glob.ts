@@ -1,5 +1,6 @@
-import { execSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { resolve, relative } from 'node:path';
+import { minimatch } from 'minimatch';
 import type { ToolDefinition } from './types.js';
 import { getProjectDir } from '../config/workspace.js';
 
@@ -26,29 +27,66 @@ export const globTool: ToolDefinition = {
     const cwd = resolve((args.cwd as string) || getProjectDir());
 
     try {
-      // Use find with basic glob support via shell
-      const output = execSync(
-        `find . -path './${pattern}' -o -name '${pattern}' 2>/dev/null | head -200 | sort`,
-        { cwd, encoding: 'utf-8', timeout: 10000 }
-      ).trim();
+      const matches = await findMatches(cwd, pattern);
 
-      if (!output) {
+      if (matches.length === 0) {
         return { success: true, output: 'No files found matching pattern.' };
       }
+
+      // Sort and limit to 200 results
+      matches.sort();
+      const limited = matches.slice(0, 200);
+      const output = limited.join('\n')
+        + (matches.length > 200 ? `\n... (${matches.length - 200} more files)` : '');
 
       return { success: true, output };
-    } catch {
-      // Fallback: use ls with globbing
-      try {
-        const output = execSync(
-          `ls -1 ${pattern} 2>/dev/null | head -200`,
-          { cwd, encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
-        ).trim();
-
-        return { success: true, output: output || 'No files found matching pattern.' };
-      } catch {
-        return { success: true, output: 'No files found matching pattern.' };
-      }
+    } catch (err) {
+      return {
+        success: false,
+        output: '',
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   },
 };
+
+/**
+ * Recursively find files matching a glob pattern using native Node.js APIs.
+ * No shell execution — safe from injection.
+ */
+async function findMatches(root: string, pattern: string, maxDepth = 20): Promise<string[]> {
+  const results: string[] = [];
+  const MAX_RESULTS = 500;
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > maxDepth || results.length >= MAX_RESULTS) return;
+
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // Skip unreadable directories
+    }
+
+    for (const entry of entries) {
+      if (results.length >= MAX_RESULTS) break;
+
+      const fullPath = resolve(dir, entry.name);
+      const relPath = relative(root, fullPath);
+
+      // Skip hidden directories like .git
+      if (entry.isDirectory() && entry.name.startsWith('.')) continue;
+
+      if (entry.isDirectory()) {
+        await walk(fullPath, depth + 1);
+      }
+
+      if (minimatch(relPath, pattern, { dot: false, matchBase: !pattern.includes('/') })) {
+        results.push(relPath);
+      }
+    }
+  }
+
+  await walk(root, 0);
+  return results;
+}

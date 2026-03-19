@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ToolDefinition } from './types.js';
-import { resolveInProject } from '../config/workspace.js';
+import { validateWritePath } from '../security/paths.js';
 
 export const writeTool: ToolDefinition = {
   name: 'write',
@@ -22,7 +22,7 @@ export const writeTool: ToolDefinition = {
   },
 
   async execute(args) {
-    const filePath = resolveInProject(args.path as string);
+    const filePath = validateWritePath(args.path as string);
     const content = args.content as string;
 
     try {

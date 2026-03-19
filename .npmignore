@@ -1,0 +1,34 @@
+# Test files
+test/
+__tests__/
+*.test.ts
+*.spec.ts
+
+# Data and database files
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Environment and secrets
+.env
+.env.*
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Julia internal
+.juliacode/
+.claude/
+
+# Build artifacts
+node_modules/
+dist/
+*.tsbuildinfo

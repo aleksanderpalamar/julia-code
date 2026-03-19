@@ -10,12 +10,17 @@ import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { getSubagentManager } from './subagent.js';
 import { listOllamaModels } from '../providers/ollama.js';
+import { wrapToolResult } from '../security/boundaries.js';
+import { sanitizeToolResult } from '../security/sanitize.js';
+import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
+import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface AgentEvents {
   thinking: [];
   chunk: [text: string];
   tool_call: [toolCall: ToolCall];
   tool_result: [name: string, result: string, success: boolean];
+  approval_needed: [toolName: string, args: Record<string, unknown>, respond: (result: ApprovalResult) => void];
   compacting: [];
   usage: [usage: TokenUsage];
   title: [title: string];
@@ -33,10 +38,16 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   private options: AgentLoopOptions;
   private planMode = false;
   private temperament = 'neutral';
+  private approvedAllForSession = false;
+  private allowRules: AllowRule[] = [];
 
   constructor(options?: AgentLoopOptions) {
     super();
     this.options = options ?? {};
+  }
+
+  setAllowRules(rules: AllowRule[]): void {
+    this.allowRules = rules;
   }
 
   setExcludeTools(tools: string[]): void {
@@ -142,7 +153,36 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         // Execute tool calls and save results
         for (const tc of toolCalls) {
-          const result = await executeTool(tc.function.name, tc.function.arguments);
+          const toolName = tc.function.name;
+          const toolArgs = tc.function.arguments;
+
+          // Security: check for blocked commands
+          if (toolName === 'exec' && isBlockedCommand(toolArgs.command as string)) {
+            const resultText = 'Operação bloqueada: este comando está na blocklist de segurança.';
+            addMessage(sessionId, 'tool', resultText, undefined, tc.id);
+            this.emit('tool_result', toolName, resultText, false);
+            continue;
+          }
+
+          // Security: approval gate for dangerous tools
+          const risk = getToolRisk(toolName);
+          if (risk === 'dangerous' && !this.approvedAllForSession) {
+            // Check allow rules first
+            if (!matchesAllowRule(toolName, toolArgs, this.allowRules)) {
+              const approved = await this.requestApproval(toolName, toolArgs);
+              if (approved === 'deny') {
+                const resultText = 'Operação negada pelo usuário.';
+                addMessage(sessionId, 'tool', resultText, undefined, tc.id);
+                this.emit('tool_result', toolName, resultText, false);
+                continue;
+              }
+              if (approved === 'approve_all') {
+                this.approvedAllForSession = true;
+              }
+            }
+          }
+
+          const result = await executeTool(toolName, toolArgs);
           let resultText = result.success
             ? result.output
             : `Error: ${result.error}\n${result.output}`;
@@ -153,8 +193,12 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             resultText = resultText.slice(0, MAX_RESULT_CHARS) + '\n... [truncated — use offset/limit for large files]';
           }
 
+          // Security: sanitize and wrap tool results with boundary markers
+          resultText = sanitizeToolResult(resultText);
+          resultText = wrapToolResult(toolName, resultText);
+
           addMessage(sessionId, 'tool', resultText, undefined, tc.id);
-          this.emit('tool_result', tc.function.name, resultText, result.success);
+          this.emit('tool_result', toolName, resultText, result.success);
         }
 
         // Loop continues — model will see tool results and respond
@@ -168,6 +212,24 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Request approval from the user for a dangerous tool call.
+   * Returns the user's decision.
+   */
+  private requestApproval(toolName: string, args: Record<string, unknown>): Promise<ApprovalResult> {
+    return new Promise<ApprovalResult>((resolve) => {
+      // If no listeners are attached, auto-approve (headless/gateway mode)
+      if (this.listenerCount('approval_needed') === 0) {
+        resolve('approve');
+        return;
+      }
+
+      this.emit('approval_needed', toolName, args, (result: ApprovalResult) => {
+        resolve(result);
+      });
+    });
   }
 
   /**

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { buildSafeEnv } from '../security/permissions.js';
 
 interface PendingRequest {
   resolve: (result: unknown) => void;
@@ -29,6 +30,13 @@ interface JsonRpcResponse {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * Allowlist of commands that MCP servers can be started with.
+ */
+const MCP_COMMAND_ALLOWLIST = new Set([
+  'npx', 'node', 'python', 'python3', 'uvx', 'uv', 'deno', 'bun',
+]);
+
 export class McpTransport extends EventEmitter {
   private child: ChildProcess | null = null;
   private pending = new Map<number, PendingRequest>();
@@ -45,9 +53,20 @@ export class McpTransport extends EventEmitter {
   }
 
   start(): void {
+    // Security: validate command against allowlist
+    const baseCommand = this.command.split('/').pop() ?? this.command;
+    if (!MCP_COMMAND_ALLOWLIST.has(baseCommand)) {
+      throw new Error(
+        `Comando MCP não permitido: "${this.command}". Permitidos: ${[...MCP_COMMAND_ALLOWLIST].join(', ')}`
+      );
+    }
+
+    // Security: use curated env instead of full process.env
+    const safeEnv = buildSafeEnv(this.env);
+
     this.child = spawn(this.command, this.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...this.env },
+      env: safeEnv,
     });
 
     this.child.stdout!.on('data', (chunk: Buffer) => {

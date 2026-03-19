@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep, join } from 'node:path';
+import { homedir } from 'node:os';
 import { getConfig } from './index.js';
 
 let _workspace: string | null = null;
@@ -38,19 +39,42 @@ export function getProjectDir(): string {
 }
 
 /**
- * Resolve a path relative to the project directory.
- * Absolute paths are returned as-is, relative paths are resolved against project dir.
+ * Resolve a path relative to the project directory with containment.
+ * Ensures the resolved path stays within the project dir or juliacode home.
+ * Throws if the path escapes allowed boundaries.
  */
-export function resolveInProject(path: string): string {
-  if (path.startsWith('/')) return path;
-  return resolve(_projectDir, path);
+export function resolveInProject(inputPath: string): string {
+  const resolved = resolve(_projectDir, inputPath);
+  const juliaHome = join(homedir(), '.juliacode');
+
+  if (
+    resolved === _projectDir ||
+    resolved.startsWith(_projectDir + sep) ||
+    resolved.startsWith(juliaHome + sep)
+  ) {
+    return resolved;
+  }
+
+  throw new Error(`Acesso negado: "${inputPath}" está fora do diretório do projeto`);
 }
 
 /**
- * Resolve a path relative to the workspace.
- * Absolute paths are returned as-is, relative paths are resolved against workspace.
+ * Resolve a path relative to the workspace with containment.
+ * Ensures the resolved path stays within workspace or juliacode home.
+ * Throws if the path escapes allowed boundaries.
  */
-export function resolveInWorkspace(path: string): string {
-  if (path.startsWith('/')) return path;
-  return resolve(getWorkspace(), path);
+export function resolveInWorkspace(inputPath: string): string {
+  const workspace = getWorkspace();
+  const resolved = resolve(workspace, inputPath);
+  const juliaHome = join(homedir(), '.juliacode');
+
+  if (
+    resolved === workspace ||
+    resolved.startsWith(workspace + sep) ||
+    resolved.startsWith(juliaHome + sep)
+  ) {
+    return resolved;
+  }
+
+  throw new Error(`Acesso negado: "${inputPath}" está fora do workspace`);
 }

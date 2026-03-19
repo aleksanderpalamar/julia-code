@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import type { ToolDefinition } from './types.js';
 import { getProjectDir } from '../config/workspace.js';
+import { buildSafeEnv } from '../security/permissions.js';
 
 export const execTool: ToolDefinition = {
   name: 'exec',
@@ -36,11 +37,7 @@ export const execTool: ToolDefinition = {
         encoding: 'utf-8',
         maxBuffer: 1024 * 1024,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          TERM: 'dumb',
-          NO_COLOR: '1',
-        },
+        env: buildSafeEnv(),
       });
 
       return { success: true, output: stripAnsi(output.trim()) };

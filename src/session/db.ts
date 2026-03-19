@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getConfig } from '../config/index.js';
 
@@ -9,11 +9,21 @@ export function getDb(): Database.Database {
   if (_db) return _db;
 
   const dbPath = getConfig().dbPath;
-  mkdirSync(dirname(dbPath), { recursive: true });
+  const dbDir = dirname(dbPath);
+
+  // Security: restrictive permissions on database directory and file
+  mkdirSync(dbDir, { recursive: true, mode: 0o700 });
 
   _db = new Database(dbPath);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
+
+  // Set restrictive file permissions (owner read/write only)
+  try {
+    chmodSync(dbPath, 0o600);
+  } catch {
+    // May fail on some filesystems, non-critical
+  }
 
   initSchema(_db);
   return _db;

@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { ToolDefinition } from './types.js';
-import { resolveInProject } from '../config/workspace.js';
+import { validateWritePath } from '../security/paths.js';
 
 export const editTool: ToolDefinition = {
   name: 'edit',
@@ -29,7 +29,7 @@ export const editTool: ToolDefinition = {
   },
 
   async execute(args) {
-    const filePath = resolveInProject(args.path as string);
+    const filePath = validateWritePath(args.path as string);
     const oldStr = args.old_string as string;
     const newStr = args.new_string as string;
     const replaceAll = (args.replace_all as boolean) || false;

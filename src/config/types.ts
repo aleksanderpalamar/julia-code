@@ -67,6 +67,12 @@ export const SettingsSchema = z.object({
     default: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   }).optional(),
   mcpServers: z.record(McpServerConfigSchema).optional(),
+  security: z.object({
+    allowRules: z.array(z.object({
+      tool: z.string(),
+      pattern: z.string(),
+    })).default([]),
+  }).optional(),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

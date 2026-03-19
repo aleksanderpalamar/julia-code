@@ -5,12 +5,20 @@ import type { ChatEntry } from '../components/Chat.js';
 import type { TokenUsage } from '../../providers/types.js';
 import type { AgentMode, Temperament } from '../types.js';
 import { WRITE_TOOLS } from '../types.js';
+import type { ApprovalResult } from '../components/ApprovalPrompt.js';
+
+export interface PendingApproval {
+  toolName: string;
+  args: Record<string, unknown>;
+  respond: (result: ApprovalResult) => void;
+}
 
 export function useAgent(onSessionChanged?: () => void) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [sessionTokens, setSessionTokens] = useState({ promptTokens: 0, completionTokens: 0 });
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const queueRef = useRef<AgentQueue | null>(null);
   const onSessionChangedRef = useRef(onSessionChanged);
   onSessionChangedRef.current = onSessionChanged;
@@ -90,11 +98,16 @@ export function useAgent(onSessionChanged?: () => void) {
       setEntries(e => [...e, { type: 'error', content: error }]);
     };
 
+    const onApprovalNeeded = (toolName: string, args: Record<string, unknown>, respond: (result: ApprovalResult) => void) => {
+      setPendingApproval({ toolName, args, respond });
+    };
+
     agent.on('thinking', onThinking);
     agent.on('chunk', onChunk);
     agent.on('tool_call', onToolCall);
     agent.on('tool_result', onToolResult);
     agent.on('compacting', onCompacting);
+    agent.on('approval_needed', onApprovalNeeded);
     agent.on('usage', onUsage);
     agent.on('title', onTitle);
     agent.on('done', onDone);
@@ -106,6 +119,7 @@ export function useAgent(onSessionChanged?: () => void) {
       agent.off('tool_call', onToolCall);
       agent.off('tool_result', onToolResult);
       agent.off('compacting', onCompacting);
+      agent.off('approval_needed', onApprovalNeeded);
       agent.off('usage', onUsage);
       agent.off('title', onTitle);
       agent.off('done', onDone);
@@ -141,5 +155,12 @@ export function useAgent(onSessionChanged?: () => void) {
     []
   );
 
-  return { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry };
+  const resolveApproval = useCallback((result: ApprovalResult) => {
+    if (pendingApproval) {
+      pendingApproval.respond(result);
+      setPendingApproval(null);
+    }
+  }, [pendingApproval]);
+
+  return { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, pendingApproval, resolveApproval };
 }
