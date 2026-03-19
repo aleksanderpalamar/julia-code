@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AgentLoop } from '../../agent/loop.js';
 import { AgentQueue } from '../../agent/queue.js';
+import { addMessage } from '../../session/manager.js';
 import type { ChatEntry } from '../components/Chat.js';
 import type { TokenUsage } from '../../providers/types.js';
 import type { AgentMode, Temperament } from '../types.js';
@@ -155,6 +156,14 @@ export function useAgent(onSessionChanged?: () => void) {
     []
   );
 
+  const sendBtw = useCallback(
+    (sessionId: string, message: string) => {
+      addMessage(sessionId, 'user', `[btw] ${message}`);
+      setEntries(e => [...e, { type: 'btw', content: message }]);
+    },
+    []
+  );
+
   const resolveApproval = useCallback((result: ApprovalResult) => {
     if (pendingApproval) {
       pendingApproval.respond(result);
@@ -162,5 +171,5 @@ export function useAgent(onSessionChanged?: () => void) {
     }
   }, [pendingApproval]);
 
-  return { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, pendingApproval, resolveApproval };
+  return { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval };
 }

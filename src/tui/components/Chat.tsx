@@ -4,7 +4,7 @@ import { Markdown } from './Markdown.js';
 import { ToolOutput } from './ToolOutput.js';
 
 export interface ChatEntry {
-  type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'system';
+  type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'system' | 'btw';
   content: string;
   toolName?: string;
   toolSuccess?: boolean;
@@ -24,6 +24,9 @@ export function Chat({ entries, streamingText }: Props) {
             <>
               <Text color="blue" bold>{'> '}{entry.content}</Text>
             </>
+          )}
+          {entry.type === 'btw' && (
+            <Text color="blue" bold>{'> '}<Text color="cyan">[btw] </Text>{entry.content}</Text>
           )}
           {entry.type === 'assistant' && (
             <Markdown content={entry.content} />

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Box, useApp, useInput } from "ink";
@@ -7,6 +7,7 @@ import { Input } from "./components/Input.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { TrustPrompt } from "./components/TrustPrompt.js";
 import { ApprovalPrompt, summarizeArgs } from "./components/ApprovalPrompt.js";
+import { BtwInput } from "./components/BtwInput.js";
 import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
 import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
@@ -41,13 +42,14 @@ export function App({ sessionId }: Props) {
   const projectDir = getProjectDir();
   const [trusted, setTrusted] = useState(() => isDirectoryTrusted(projectDir));
   const { session, refreshSession } = useSession(sessionId);
-  const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, pendingApproval, resolveApproval } =
+  const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval } =
     useAgent(refreshSession);
   const model = getConfig().defaultModel;
   const [mode, setMode] = useState<AgentMode>('normal');
   const [temperament, setTemperament] = useState<Temperament>(() => getConfig().defaultTemperament as Temperament);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [pendingImageNames, setPendingImageNames] = useState<string[]>([]);
+  const [showBtw, setShowBtw] = useState(false);
 
   const { pasteInProgress } = useClipboardPaste({
     onImagePasted: (base64, name) => {
@@ -276,12 +278,33 @@ export function App({ sessionId }: Props) {
     [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames, temperament],
   );
 
+  const handleBtwSubmit = useCallback(
+    (text: string) => {
+      sendBtw(session.id, text);
+      setShowBtw(false);
+    },
+    [session.id, sendBtw]
+  );
+
+  const handleBtwCancel = useCallback(() => {
+    setShowBtw(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isThinking) setShowBtw(false);
+  }, [isThinking]);
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit();
     }
     if (key.shift && key.tab) {
       setMode(prev => nextMode(prev));
+    }
+    if (key.ctrl && input === "b") {
+      if (isThinking && !pendingApproval) {
+        setShowBtw(true);
+      }
     }
   });
 
@@ -315,6 +338,11 @@ export function App({ sessionId }: Props) {
             argsSummary={summarizeArgs(pendingApproval.toolName, pendingApproval.args)}
             onResult={resolveApproval}
           />
+        </Box>
+      )}
+      {showBtw && (
+        <Box paddingX={1}>
+          <BtwInput onSubmit={handleBtwSubmit} onCancel={handleBtwCancel} />
         </Box>
       )}
       <Box paddingX={1} paddingY={0}>
