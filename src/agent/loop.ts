@@ -78,6 +78,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const config = getConfig();
     const activeModel = model ?? config.defaultModel;
     const provider = getProvider('ollama');
+
     let toolSchemas = getToolSchemas();
     if (this.options.excludeTools?.length) {
       toolSchemas = toolSchemas.filter(s => !this.options.excludeTools!.includes(s.function.name));
@@ -130,7 +131,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             temperament: this.temperament,
             iteration: iterations,
             maxIterations,
-          });
+            });
           this.emit('context_health', rebuilt.health);
           // Use rebuilt messages
           messages.length = 0;

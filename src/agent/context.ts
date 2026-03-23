@@ -73,7 +73,7 @@ export async function buildContext(
   const maxMemoryTokens = budget.memories;
   const allMemories = getRecentMemories(30); // fetch more, then trim
   let memoriesSection = '';
-  if (allMemories.length > 0) {
+  if (allMemories.length > 0 && maxMemoryTokens > 0) {
     const memoryLines: string[] = [];
     let memTokens = 0;
     for (const m of allMemories) {
@@ -95,7 +95,6 @@ export async function buildContext(
     }
   }
 
-  // Inject memories into the last system message or as new one
   if (memoriesSection) {
     messages.push({ role: 'system', content: memoriesSection });
   }
@@ -156,7 +155,6 @@ export async function buildContext(
 /**
  * Check if the context needs compaction.
  * Now uses the dynamic budget system instead of hardcoded thresholds.
- * Falls back to config thresholds if budget is not provided.
  */
 export async function getCompactableMessages(
   sessionId: string,

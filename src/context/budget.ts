@@ -29,8 +29,11 @@ export interface ContextBudget {
 export async function computeBudget(model: string, systemPromptText?: string): Promise<ContextBudget> {
   const total = await getContextLength(model);
 
-  // Reserve 15% for completion output, capped at 4096
-  const reservedForOutput = Math.min(Math.floor(total * 0.15), 4096);
+  // Reserve 15% for completion output, capped at 4096, floor at 512
+  const reservedForOutput = Math.max(
+    Math.min(Math.floor(total * 0.15), 4096),
+    512, // minimum tokens for a useful response
+  );
   const available = total - reservedForOutput;
 
   // System prompt: measured if provided, otherwise estimate ~2500 tokens
@@ -93,7 +96,7 @@ export function computeToolResultCap(budget: ContextBudget, toolName: string): n
   // Convert token budget to approximate char count
   const capChars = Math.floor(baseTokens * pct * 3.5);
 
-  // Hard ceiling: 12000 chars for safety
+  // Hard ceiling for safety
   return Math.min(capChars, 12000);
 }
 
