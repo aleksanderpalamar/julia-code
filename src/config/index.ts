@@ -1,5 +1,5 @@
 import { config as loadEnv } from 'dotenv';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { ConfigSchema, SettingsSchema, type Config, type Settings } from './types.js';
@@ -7,7 +7,27 @@ import { ConfigSchema, SettingsSchema, type Config, type Settings } from './type
 let _config: Config | null = null;
 let _settings: Settings | null = null;
 
-const SETTINGS_PATH = join(homedir(), '.juliacode', 'settings.json');
+const JULIA_HOME = join(homedir(), '.juliacode');
+const SETTINGS_PATH = join(JULIA_HOME, 'settings.json');
+
+function ensureJuliaHome(): void {
+  mkdirSync(join(JULIA_HOME, 'data'), { recursive: true });
+
+  if (!existsSync(SETTINGS_PATH)) {
+    const defaults = {
+      meta: { version: '0.1.0' },
+      models: {
+        provider: 'ollama',
+        baseUrl: 'http://localhost:11434',
+        default: 'qwen3:8b',
+        available: [],
+      },
+      agent: { maxToolIterations: 25 },
+      session: { compactionThreshold: 6000, compactionKeepRecent: 6 },
+    };
+    writeFileSync(SETTINGS_PATH, JSON.stringify(defaults, null, 2));
+  }
+}
 
 function loadSettings(): Settings | null {
   if (_settings) return _settings;
@@ -34,11 +54,11 @@ export function getSettings(): Settings | null {
 export function loadConfig(): Config {
   if (_config) return _config;
 
+  ensureJuliaHome();
   loadEnv();
   const settings = loadSettings();
 
   // Priority: env vars > settings.json > defaults
-  const juliaHome = join(homedir(), '.juliacode');
 
   _config = ConfigSchema.parse({
     ollamaHost: process.env.OLLAMA_HOST
@@ -69,7 +89,7 @@ export function loadConfig(): Config {
 
   // Resolve relative dbPath against ~/.juliacode/ instead of cwd
   if (_config.dbPath && !_config.dbPath.startsWith('/')) {
-    _config.dbPath = join(juliaHome, _config.dbPath);
+    _config.dbPath = join(JULIA_HOME, _config.dbPath);
   }
 
   return _config;

@@ -1,15 +1,23 @@
 {
-  "name": "julia-code",
+  "name": "juliacode",
   "version": "0.1.0",
   "description": "Julia Code (juju) - AI coding assistant TUI powered by local models via Ollama",
   "license": "GPL-3.0-only",
   "type": "module",
   "bin": {
-    "juju": "./juju.ts"
+    "juju": "./dist/juju.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "start": "tsx juju.ts",
     "dev": "tsx watch juju.ts",
+    "build": "tsc && node scripts/fix-shebang.mjs",
+    "prepublishOnly": "npm run build",
     "test": "vitest"
   },
   "dependencies": {
