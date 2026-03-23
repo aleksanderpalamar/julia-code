@@ -75,7 +75,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   // POST /sessions
   if (method === 'POST' && path === '/sessions') {
     const body = await readBody(req);
-    const session = createSession(body.title);
+    const session = createSession(body.title as string | undefined);
     return json(res, 201, { session });
   }
 
@@ -101,8 +101,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const body = await readBody(req);
     if (!body.message) return json(res, 400, { error: 'message is required' });
 
-    const sessionId = body.session_id ?? createSession(body.title).id;
-    const model = body.model ?? getConfig().defaultModel;
+    const sessionId = (body.session_id as string) ?? createSession(body.title as string | undefined).id;
+    const model = (body.model as string) ?? getConfig().defaultModel;
+    const message = body.message as string;
 
     // Collect events during the run
     const events: Array<{ type: string; data: unknown }> = [];
@@ -118,7 +119,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     agent.on('tool_result', onToolResult);
 
     try {
-      await queue.enqueue(sessionId, body.message, model);
+      await queue.enqueue(sessionId, message, model);
     } finally {
       agent.off('chunk', onChunk);
       agent.off('tool_call', onToolCall);
@@ -141,8 +142,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const body = await readBody(req);
     if (!body.message) return json(res, 400, { error: 'message is required' });
 
-    const sessionId = body.session_id ?? createSession(body.title).id;
-    const model = body.model ?? getConfig().defaultModel;
+    const sessionId = (body.session_id as string) ?? createSession(body.title as string | undefined).id;
+    const model = (body.model as string) ?? getConfig().defaultModel;
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -171,7 +172,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     agent.on('error', onError);
 
     try {
-      await queue.enqueue(sessionId, body.message, model);
+      await queue.enqueue(sessionId, body.message as string, model);
     } finally {
       agent.off('thinking', onThinking);
       agent.off('chunk', onChunk);

@@ -8,10 +8,11 @@ import { StatusBar } from "./components/StatusBar.js";
 import { TrustPrompt } from "./components/TrustPrompt.js";
 import { ApprovalPrompt, summarizeArgs } from "./components/ApprovalPrompt.js";
 import { BtwInput } from "./components/BtwInput.js";
+import { ModelPicker } from "./components/ModelPicker.js";
 import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
 import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
-import { getConfig } from "../config/index.js";
+import { getConfig, reloadConfig } from "../config/index.js";
 import { getProjectDir } from "../config/workspace.js";
 import { nextMode, modeLabel, nextTemperament, temperamentLabel } from "./types.js";
 import type { AgentMode, Temperament } from "./types.js";
@@ -26,6 +27,9 @@ import {
   getMcpServerConfigs,
   addMcpServerConfig,
   removeMcpServerConfig,
+  getAvailableModels,
+  getCurrentModel,
+  setDefaultModel,
 } from "../config/mcp.js";
 import {
   getMcpServerStatuses,
@@ -44,12 +48,13 @@ export function App({ sessionId }: Props) {
   const { session, refreshSession } = useSession(sessionId);
   const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval } =
     useAgent(refreshSession);
-  const model = getConfig().defaultModel;
+  const [model, setModel] = useState(() => getConfig().defaultModel);
   const [mode, setMode] = useState<AgentMode>('normal');
   const [temperament, setTemperament] = useState<Temperament>(() => getConfig().defaultTemperament as Temperament);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [pendingImageNames, setPendingImageNames] = useState<string[]>([]);
   const [showBtw, setShowBtw] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   const { pasteInProgress } = useClipboardPaste({
     onImagePasted: (base64, name) => {
@@ -182,6 +187,31 @@ export function App({ sessionId }: Props) {
         return;
       }
 
+      // /model commands
+      if (text === "/model") {
+        setShowModelPicker(true);
+        return;
+      }
+
+      if (text.startsWith("/model ")) {
+        const name = text.slice("/model ".length).trim();
+        if (!name) {
+          addSystemEntry("Usage: /model [name]");
+          return;
+        }
+        const available = getAvailableModels();
+        const match = available.find(m => m.id === name);
+        if (!match) {
+          addSystemEntry(`Model '${name}' not found. Use /model to see available models.`);
+          return;
+        }
+        setDefaultModel(name);
+        reloadConfig();
+        setModel(name);
+        addSystemEntry(`Model switched to: ${name}`);
+        return;
+      }
+
       // /temperament commands
       if (text === "/temperament") {
         setTemperament(prev => {
@@ -278,6 +308,18 @@ export function App({ sessionId }: Props) {
     [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames, temperament],
   );
 
+  const handleModelSelect = useCallback((modelId: string) => {
+    setDefaultModel(modelId);
+    reloadConfig();
+    setModel(modelId);
+    setShowModelPicker(false);
+    addSystemEntry(`Model switched to: ${modelId}`);
+  }, [addSystemEntry]);
+
+  const handleModelCancel = useCallback(() => {
+    setShowModelPicker(false);
+  }, []);
+
   const handleBtwSubmit = useCallback(
     (text: string) => {
       sendBtw(session.id, text);
@@ -340,6 +382,19 @@ export function App({ sessionId }: Props) {
           />
         </Box>
       )}
+      {showModelPicker && (
+        <Box paddingX={1}>
+          <ModelPicker
+            models={getAvailableModels().map(m => ({
+              id: m.id,
+              name: m.name,
+              current: m.id === model,
+            }))}
+            onSelect={handleModelSelect}
+            onCancel={handleModelCancel}
+          />
+        </Box>
+      )}
       {showBtw && (
         <Box paddingX={1}>
           <BtwInput onSubmit={handleBtwSubmit} onCancel={handleBtwCancel} />
@@ -348,7 +403,7 @@ export function App({ sessionId }: Props) {
       <Box paddingX={1} paddingY={0}>
         <Input
           onSubmit={handleSubmit}
-          disabled={isThinking || pendingApproval !== null}
+          disabled={isThinking || pendingApproval !== null || showModelPicker}
           model={model}
           isThinking={isThinking}
           tokens={sessionTokens.promptTokens + sessionTokens.completionTokens}

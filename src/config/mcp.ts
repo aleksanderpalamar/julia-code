@@ -41,11 +41,33 @@ export function removeMcpServerConfig(name: string): void {
   writeSettings(settings);
 }
 
+export function setDefaultModel(modelId: string): void {
+  const settings = readSettings();
+  if (!settings.models) {
+    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: modelId, available: [] };
+  } else {
+    settings.models.default = modelId;
+  }
+  writeSettings(settings);
+}
+
+export function getAvailableModels(): Array<{ id: string; name?: string }> {
+  const settings = readSettings();
+  return settings.models?.available ?? [];
+}
+
+export function getCurrentModel(): string {
+  const settings = readSettings();
+  return settings.models?.default ?? '';
+}
+
 export async function syncAvailableModels(): Promise<void> {
   const { listOllamaModels } = await import('../providers/ollama.js');
   const models = await listOllamaModels();
   const settings = readSettings();
-  if (!settings.models) settings.models = {};
-  settings.models.available = models.map(m => ({ id: m, name: m }));
+  if (!settings.models) {
+    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: models[0] ?? '', available: [] };
+  }
+  settings.models!.available = models.map(m => ({ id: m, name: m }));
   writeSettings(settings);
 }

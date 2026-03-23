@@ -19,7 +19,7 @@ function ensureJuliaHome(): void {
       models: {
         provider: 'ollama',
         baseUrl: 'http://localhost:11434',
-        default: 'qwen3:8b',
+        default: '',
         available: [],
       },
       agent: { maxToolIterations: 25 },
@@ -98,6 +98,12 @@ export function loadConfig(): Config {
 export function getConfig(): Config {
   if (!_config) return loadConfig();
   return _config;
+}
+
+export function reloadConfig(): Config {
+  _config = null;
+  _settings = null;
+  return loadConfig();
 }
 
 export type { Config };
