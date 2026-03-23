@@ -110,6 +110,7 @@ export interface Compaction {
   summary: string;
   messages_start: number;
   messages_end: number;
+  format: 'text' | 'structured';
   created_at: string;
 }
 
@@ -279,11 +280,17 @@ export function getLatestCompaction(sessionId: string): Compaction | undefined {
   ).get(sessionId) as Compaction | undefined;
 }
 
-export function saveCompaction(sessionId: string, summary: string, messagesStart: number, messagesEnd: number): Compaction {
+export function saveCompaction(
+  sessionId: string,
+  summary: string,
+  messagesStart: number,
+  messagesEnd: number,
+  format: 'text' | 'structured' = 'text',
+): Compaction {
   const db = getDb();
   db.prepare(
-    'INSERT INTO compactions (session_id, summary, messages_start, messages_end) VALUES (?, ?, ?, ?)'
-  ).run(sessionId, summary, messagesStart, messagesEnd);
+    'INSERT INTO compactions (session_id, summary, messages_start, messages_end, format) VALUES (?, ?, ?, ?, ?)'
+  ).run(sessionId, summary, messagesStart, messagesEnd, format);
 
   const lastId = db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
   return db.prepare('SELECT * FROM compactions WHERE id = ?').get(lastId.id) as Compaction;

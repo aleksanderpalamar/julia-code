@@ -3,9 +3,12 @@ import { EventEmitter } from 'node:events';
 import type { ChatMessage, ToolCall, ChatChunk, TokenUsage } from '../providers/types.js';
 import { getProvider } from '../providers/registry.js';
 import { getToolSchemas, executeTool } from '../tools/registry.js';
-import { buildContext, getCompactableMessages } from './context.js';
+import { buildContext, getCompactableMessages, getEmergencyCompactableMessages } from './context.js';
 import { addMessage, saveCompaction, getLatestCompaction, addSessionTokens, getSession, updateSessionTitle, getMessageCount, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
+import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
+import { performStructuredCompaction, serializeCompaction, deserializeCompaction, type StructuredCompaction } from '../context/compaction.js';
+import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { getSubagentManager } from './subagent.js';
@@ -22,6 +25,7 @@ export interface AgentEvents {
   tool_result: [name: string, result: string, success: boolean];
   approval_needed: [toolName: string, args: Record<string, unknown>, respond: (result: ApprovalResult) => void];
   compacting: [];
+  context_health: [health: ContextHealth];
   usage: [usage: TokenUsage];
   title: [title: string];
   done: [fullText: string];
@@ -97,18 +101,41 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       await this.maybeCompact(sessionId, activeModel);
 
       let iterations = 0;
+      let currentBudget: ContextBudget | null = null;
 
       while (iterations < maxIterations) {
         iterations++;
         this.emit('thinking');
 
-        // Build context fresh each iteration
-        const messages = buildContext(sessionId, {
+        // Build context fresh each iteration (now async with budget awareness)
+        const { messages, budget, health } = await buildContext(sessionId, activeModel, {
           planMode: this.planMode,
           temperament: this.temperament,
           iteration: iterations,
           maxIterations,
         });
+        currentBudget = budget;
+
+        // Emit context health for TUI
+        this.emit('context_health', health);
+
+        // Emergency compaction if context is critically full
+        if (shouldEmergencyCompact(health)) {
+          this.emit('compacting');
+          const keepCount = getEmergencyKeepCount(health);
+          await this.performEmergencyCompaction(sessionId, activeModel, keepCount);
+          // Rebuild context after emergency compaction
+          const rebuilt = await buildContext(sessionId, activeModel, {
+            planMode: this.planMode,
+            temperament: this.temperament,
+            iteration: iterations,
+            maxIterations,
+          });
+          this.emit('context_health', rebuilt.health);
+          // Use rebuilt messages
+          messages.length = 0;
+          messages.push(...rebuilt.messages);
+        }
 
         // Call LLM
         let fullText = '';
@@ -192,10 +219,16 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             ? result.output
             : `Error: ${result.error}\n${result.output}`;
 
-          // Truncate large tool results to avoid context overflow
-          const MAX_RESULT_CHARS = 12000;
-          if (resultText.length > MAX_RESULT_CHARS) {
-            resultText = resultText.slice(0, MAX_RESULT_CHARS) + '\n... [truncated — use offset/limit for large files]';
+          // Truncate large tool results with dynamic caps based on context budget
+          let maxResultChars = 12000; // default fallback
+          if (currentBudget) {
+            maxResultChars = computeToolResultCap(currentBudget, toolName);
+            // Further reduce if context health is poor
+            const capFactor = getToolResultCapFactor(health);
+            maxResultChars = Math.floor(maxResultChars * capFactor);
+          }
+          if (resultText.length > maxResultChars) {
+            resultText = resultText.slice(0, maxResultChars) + '\n... [truncated — use offset/limit for large files]';
           }
 
           // Security: sanitize and wrap tool results with boundary markers
@@ -474,61 +507,68 @@ Each subtask description must be self-contained with ALL context needed (file pa
   }
 
   private async maybeCompact(sessionId: string, model: string): Promise<void> {
-    const compactable = getCompactableMessages(sessionId);
+    const compactable = await getCompactableMessages(sessionId, model);
     if (!compactable) return;
 
     this.emit('compacting');
 
     try {
-      const provider = getProvider('ollama');
       const existingCompaction = getLatestCompaction(sessionId);
 
-      // Build summarization prompt
-      const summaryMessages: ChatMessage[] = [
-        {
-          role: 'system',
-          content: 'You are a summarizer. Condense the following conversation into a concise summary that preserves all key facts, decisions, file paths mentioned, tool results, and context needed to continue the conversation. Output ONLY the summary, no preamble.',
-        },
-      ];
-
+      // Deserialize existing compaction if structured
+      let existingStructured: StructuredCompaction | null = null;
       if (existingCompaction) {
-        summaryMessages.push({
-          role: 'user',
-          content: `Previous summary:\n${existingCompaction.summary}\n\nNew messages to incorporate:`,
-        });
+        existingStructured = deserializeCompaction(
+          existingCompaction.summary,
+          existingCompaction.format,
+        );
       }
 
-      // Add the messages to be compacted
-      let conversationText = '';
-      for (const msg of compactable.messages) {
-        const prefix = msg.role.toUpperCase();
-        conversationText += `[${prefix}]: ${msg.content}\n`;
-        if (msg.tool_calls) {
-          conversationText += `[TOOL_CALLS]: ${msg.tool_calls}\n`;
-        }
-      }
+      // Perform structured compaction
+      const structured = await performStructuredCompaction(
+        compactable.messages,
+        existingStructured,
+        model,
+      );
 
-      summaryMessages.push({ role: 'user', content: conversationText });
-
-      // Call LLM for summary
-      let summary = '';
-      const stream = provider.chat({ model, messages: summaryMessages });
-      for await (const chunk of stream) {
-        if (chunk.type === 'error') {
-          // Compaction failed — non-critical, just skip
-          return;
-        }
-        if (chunk.type === 'text' && chunk.text) {
-          summary += chunk.text;
-        }
-      }
-
-      if (summary.trim()) {
+      const summary = serializeCompaction(structured);
+      if (summary) {
         const startId = existingCompaction?.messages_end ?? 0;
-        saveCompaction(sessionId, summary.trim(), startId, compactable.lastId);
+        saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
       }
     } catch {
       // Compaction is non-critical — don't break the agent loop
+    }
+  }
+
+  private async performEmergencyCompaction(sessionId: string, model: string, keepCount: number): Promise<void> {
+    const compactable = await getEmergencyCompactableMessages(sessionId, model, keepCount);
+    if (!compactable) return;
+
+    try {
+      const existingCompaction = getLatestCompaction(sessionId);
+
+      let existingStructured: StructuredCompaction | null = null;
+      if (existingCompaction) {
+        existingStructured = deserializeCompaction(
+          existingCompaction.summary,
+          existingCompaction.format,
+        );
+      }
+
+      const structured = await performStructuredCompaction(
+        compactable.messages,
+        existingStructured,
+        model,
+      );
+
+      const summary = serializeCompaction(structured);
+      if (summary) {
+        const startId = existingCompaction?.messages_end ?? 0;
+        saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
+      }
+    } catch {
+      // Emergency compaction failed — continue anyway
     }
   }
 
