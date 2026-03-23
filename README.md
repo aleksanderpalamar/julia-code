@@ -24,7 +24,7 @@ AI programming assistant that runs in the terminal, powered by local models via 
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aleksanderpalamar/julia-code/main/install.sh | bash
+npm i -g juliacode
 ```
 
 ## Usage
@@ -45,32 +45,32 @@ juju --gateway --host 0.0.0.0 --port 3000      # custom host/port
 
 **Endpoints:**
 
-| Method | Route                    | Description              |
-| ------ | ------------------------ | ------------------------ |
-| `GET`  | `/health`                | Health check             |
-| `GET`  | `/sessions`              | List sessions            |
-| `POST` | `/sessions`              | Create session           |
-| `GET`  | `/sessions/:id`          | Session details          |
-| `GET`  | `/sessions/:id/messages` | Session messages         |
-| `POST` | `/chat`                  | Chat (full response)     |
-| `POST` | `/chat/stream`           | Chat (SSE streaming)     |
+| Method | Route                    | Description          |
+| ------ | ------------------------ | -------------------- |
+| `GET`  | `/health`                | Health check         |
+| `GET`  | `/sessions`              | List sessions        |
+| `POST` | `/sessions`              | Create session       |
+| `GET`  | `/sessions/:id`          | Session details      |
+| `GET`  | `/sessions/:id/messages` | Session messages     |
+| `POST` | `/chat`                  | Chat (full response) |
+| `POST` | `/chat/stream`           | Chat (SSE streaming) |
 
 ## Tools
 
 Julia has access to 10 tools that it executes autonomously:
 
-| Tool       | Description                              |
-| ---------- | ---------------------------------------- |
-| `exec`     | Run shell commands (git, npm, etc.)      |
-| `read`     | Read files with line numbers             |
-| `write`    | Create/overwrite files                   |
-| `edit`     | Replace text segments in files           |
-| `glob`     | Search files by glob pattern             |
-| `grep`     | Search content with regex                |
-| `fetch`    | Access URLs, APIs, and web pages         |
-| `memory`   | Persistent memories across sessions      |
-| `sessions` | Manage saved sessions                    |
-| `subagent` | Orchestrate parallel subagents           |
+| Tool       | Description                         |
+| ---------- | ----------------------------------- |
+| `exec`     | Run shell commands (git, npm, etc.) |
+| `read`     | Read files with line numbers        |
+| `write`    | Create/overwrite files              |
+| `edit`     | Replace text segments in files      |
+| `glob`     | Search files by glob pattern        |
+| `grep`     | Search content with regex           |
+| `fetch`    | Access URLs, APIs, and web pages    |
+| `memory`   | Persistent memories across sessions |
+| `sessions` | Manage saved sessions               |
+| `subagent` | Orchestrate parallel subagents      |
 
 ## Subagents (ACP)
 
@@ -94,11 +94,7 @@ To connect a new MCP server, edit `~/.juliacode/settings.json` and add the `mcpS
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/home/user"
-      ],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
       "env": {}
     }
   }
@@ -107,11 +103,11 @@ To connect a new MCP server, edit `~/.juliacode/settings.json` and add the `mcpS
 
 Each entry in mcpServers is an MCP server with:
 
-| Field     | Required | Description                                  |
-| --------- | -------- | -------------------------------------------- |
-| `command` | yes      | Command to start the server                  |
-| `args`    | no       | Array of arguments (default: `[]`)           |
-| `env`     | no       | Extra environment variables for the process  |
+| Field     | Required | Description                                 |
+| --------- | -------- | ------------------------------------------- |
+| `command` | yes      | Command to start the server                 |
+| `args`    | no       | Array of arguments (default: `[]`)          |
+| `env`     | no       | Extra environment variables for the process |
 
 Example with multiple servers:
 
@@ -130,7 +126,11 @@ Example with multiple servers:
     },
     "sqlite": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sqlite", "/path/to/database.db"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sqlite",
+        "/path/to/database.db"
+      ]
     }
   }
 }
@@ -215,11 +215,11 @@ SQLite with WAL mode. 7 tables:
 
 ## Stack
 
-| Layer     | Technology              |
-| --------- | ----------------------- |
-| Runtime   | Node.js (ESM)           |
-| Language  | TypeScript              |
-| UI        | React 18 + Ink          |
-| Database  | SQLite (better-sqlite3) |
-| LLM       | Ollama                  |
-| Tests     | Vitest                  |
+| Layer    | Technology              |
+| -------- | ----------------------- |
+| Runtime  | Node.js (ESM)           |
+| Language | TypeScript              |
+| UI       | React 18 + Ink          |
+| Database | SQLite (better-sqlite3) |
+| LLM      | Ollama                  |
+| Tests    | Vitest                  |

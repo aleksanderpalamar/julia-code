@@ -24,7 +24,7 @@ Assistente de programacao IA que roda no terminal, alimentada por modelos locais
 ## Instalacao
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aleksanderpalamar/julia-code/main/install.sh | bash
+npm i -g juliacode
 ```
 
 ## Uso
