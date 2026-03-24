@@ -47,7 +47,7 @@ export function useAgent(onSessionChanged?: () => void) {
       setStreamingText(prev => prev + text);
     };
 
-    const onToolCall = (tc: { function: { name: string } }) => {
+    const onToolCall = (tc: { function: { name: string; arguments: Record<string, unknown> } }) => {
       // Flush streaming text as assistant entry
       setStreamingText(prev => {
         if (prev.trim()) {
@@ -58,7 +58,7 @@ export function useAgent(onSessionChanged?: () => void) {
 
       setEntries(e => [
         ...e,
-        { type: 'tool_call', content: '', toolName: tc.function.name },
+        { type: 'tool_call', content: '', toolName: tc.function.name, toolArgs: tc.function.arguments },
       ]);
     };
 

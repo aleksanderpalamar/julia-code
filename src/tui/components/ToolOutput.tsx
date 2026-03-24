@@ -15,11 +15,13 @@ export function ToolOutput({ name, output, success }: Props) {
 
   return (
     <Box flexDirection="column" marginY={0}>
-      <Text color={success ? 'green' : 'red'}>
-        {success ? '✓' : '✗'} tool:{name}
+      <Text>
+        <Text color="gray">╰─ </Text>
+        <Text color={success ? 'green' : 'red'}>{success ? '✓' : '✗'}</Text>
+        <Text color="gray"> {name}</Text>
       </Text>
       {display && (
-        <Box marginLeft={2}>
+        <Box marginLeft={4}>
           <Text dimColor>{display}</Text>
         </Box>
       )}

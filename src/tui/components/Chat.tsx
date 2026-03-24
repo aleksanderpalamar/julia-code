@@ -7,7 +7,20 @@ export interface ChatEntry {
   type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'system' | 'btw';
   content: string;
   toolName?: string;
+  toolArgs?: Record<string, unknown>;
   toolSuccess?: boolean;
+}
+
+function formatToolCall(name: string, args?: Record<string, unknown>): string {
+  if (!args) return name;
+
+  const primaryArg = args.command ?? args.file_path ?? args.path ?? args.pattern ?? args.query ?? args.url;
+  if (primaryArg && typeof primaryArg === 'string') {
+    const short = primaryArg.length > 60 ? primaryArg.slice(0, 57) + '...' : primaryArg;
+    return `${name}(${short})`;
+  }
+
+  return name;
 }
 
 interface Props {
@@ -32,7 +45,7 @@ export function Chat({ entries, streamingText }: Props) {
             <Markdown content={entry.content} />
           )}
           {entry.type === 'tool_call' && (
-            <Text color="yellow" dimColor>⚡ calling {entry.toolName}...</Text>
+            <Text color="yellow" dimColor>⚡ {formatToolCall(entry.toolName!, entry.toolArgs)}</Text>
           )}
           {entry.type === 'tool_result' && (
             <ToolOutput

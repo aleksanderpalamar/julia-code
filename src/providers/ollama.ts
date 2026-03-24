@@ -140,9 +140,24 @@ function formatMessage(msg: ChatMessage): Record<string, unknown> {
 
 /**
  * Parse fallback tool calls from text for models without native tool support.
- * Looks for: <tool_call>{"name":"...", "arguments":{...}}</tool_call>
+ * Tries multiple formats since different models output tool calls differently.
  */
 function parseFallbackToolCalls(text: string): ToolCall[] {
+  // Format 1: <tool_call>{"name":"...", "arguments":{...}}</tool_call>
+  let calls = parseToolCallJson(text);
+  if (calls.length > 0) return calls;
+
+  // Format 2: <function_calls><invoke name="..."><parameter name="...">value</parameter></invoke></function_calls>
+  calls = parseFunctionCallsXml(text);
+  if (calls.length > 0) return calls;
+
+  return [];
+}
+
+/**
+ * Parse <tool_call>JSON</tool_call> format.
+ */
+function parseToolCallJson(text: string): ToolCall[] {
   const calls: ToolCall[] = [];
   const regex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
   let match: RegExpExecArray | null;
@@ -162,6 +177,36 @@ function parseFallbackToolCalls(text: string): ToolCall[] {
     } catch {
       // Skip malformed tool calls
     }
+  }
+
+  return calls;
+}
+
+/**
+ * Parse Anthropic-style <function_calls><invoke>...</invoke></function_calls> format.
+ * Used by DeepSeek, Qwen, GPT-OSS and other models that emit this XML pattern.
+ */
+function parseFunctionCallsXml(text: string): ToolCall[] {
+  const calls: ToolCall[] = [];
+  const invokeRegex = /<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/g;
+  const paramRegex = /<parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/parameter>/g;
+
+  let invokeMatch: RegExpExecArray | null;
+  while ((invokeMatch = invokeRegex.exec(text)) !== null) {
+    const name = invokeMatch[1];
+    const body = invokeMatch[2];
+    const args: Record<string, unknown> = {};
+
+    let paramMatch: RegExpExecArray | null;
+    paramRegex.lastIndex = 0;
+    while ((paramMatch = paramRegex.exec(body)) !== null) {
+      args[paramMatch[1]] = paramMatch[2].trim();
+    }
+
+    calls.push({
+      id: randomUUID(),
+      function: { name, arguments: args },
+    });
   }
 
   return calls;

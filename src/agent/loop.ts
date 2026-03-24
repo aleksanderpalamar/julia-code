@@ -89,6 +89,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       // Save user message
       addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
 
+      // Show thinking spinner immediately (before orchestration/compaction which can be slow)
+      this.emit('thinking');
+
       // Auto-orchestrate: analyze complexity and spawn subagents if needed
       if (config.acpEnabled && config.acpAutoOrchestrate && !this.options.excludeTools?.includes('subagent')) {
         const orchestrated = await this.maybeOrchestrate(sessionId, userMessage, activeModel);
