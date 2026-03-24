@@ -1,14 +1,27 @@
 import React from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
-import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentMode, Temperament } from "../types.js";
 import { modeLabel, modeColor, temperamentLabel, temperamentColor } from "../types.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { getBreakpoint } from "../responsive.js";
 
-const require = createRequire(import.meta.url);
-const pkg = require("../../../package.json") as { version: string };
+function findPackageVersion(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 10; i++) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+      if (pkg.version) return pkg.version;
+    } catch { /* keep searching */ }
+    dir = dirname(dir);
+  }
+  return "0.0.0";
+}
+
+const APP_VERSION = findPackageVersion();
 
 interface Props {
   model: string;
@@ -34,7 +47,7 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
       <Box>
         <Text color="gray">{"── "}</Text>
         <Text color="white" bold>Julia Code</Text>
-        <Text color="gray"> v{pkg.version}</Text>
+        <Text color="gray"> v{APP_VERSION}</Text>
       </Box>
 
       <Box
