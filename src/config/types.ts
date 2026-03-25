@@ -14,6 +14,8 @@ export const ConfigSchema = z.object({
   acpMaxConcurrent: z.number().default(3),
   acpSubagentMaxIterations: z.number().default(20),
   acpDefaultModel: z.string().nullable().default(null),
+  // Auto-switch: modelo dedicado para tool calling (cloud/capaz)
+  toolModel: z.string().nullable().default(null),
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   // Context window management
   contextReservePercent: z.number().default(0.15),
@@ -28,6 +30,8 @@ export const SettingsModelSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
   contextWindow: z.number().optional(),
+  isCloud: z.boolean().optional(),
+  supportsTools: z.boolean().optional(),
 });
 
 export const McpServerConfigSchema = z.object({
@@ -46,6 +50,7 @@ export const SettingsSchema = z.object({
     provider: z.string().default('ollama'),
     baseUrl: z.string().default('http://localhost:11434'),
     default: z.string().default('qwen3:8b'),
+    toolModel: z.string().nullable().default(null),
     available: z.array(SettingsModelSchema).default([]),
   }).optional(),
   agent: z.object({

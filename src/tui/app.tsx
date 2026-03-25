@@ -46,9 +46,10 @@ export function App({ sessionId }: Props) {
   const projectDir = getProjectDir();
   const [trusted, setTrusted] = useState(() => isDirectoryTrusted(projectDir));
   const { session, refreshSession } = useSession(sessionId);
-  const { entries, streamingText, isThinking, sessionTokens, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval } =
+  const { entries, streamingText, isThinking, sessionTokens, activeToolModel, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval } =
     useAgent(refreshSession);
   const [model, setModel] = useState(() => getConfig().defaultModel);
+  const configToolModel = getConfig().toolModel;
   const [mode, setMode] = useState<AgentMode>('normal');
   const [temperament, setTemperament] = useState<Temperament>(() => getConfig().defaultTemperament as Temperament);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -369,6 +370,7 @@ export function App({ sessionId }: Props) {
         tokens={session.total_tokens}
         mode={mode}
         temperament={temperament}
+        toolModel={activeToolModel ?? configToolModel}
       />
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <Chat entries={entries} streamingText={streamingText} />

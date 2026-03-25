@@ -102,6 +102,20 @@ export function getMessageCount(sessionId: string): number {
   return row.count;
 }
 
+/**
+ * Remove the last assistant message from a session.
+ * Used when local-first routing needs to discard a response and retry with cloud.
+ */
+export function removeLastAssistantMessage(sessionId: string): void {
+  const db = getDb();
+  const last = db.prepare(
+    'SELECT id FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1'
+  ).get(sessionId, 'assistant') as { id: number } | undefined;
+  if (last) {
+    db.prepare('DELETE FROM messages WHERE id = ?').run(last.id);
+  }
+}
+
 // --- Compaction ---
 
 export interface Compaction {

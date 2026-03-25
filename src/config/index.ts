@@ -84,6 +84,7 @@ export function loadConfig(): Config {
     acpMaxConcurrent: settings?.acp?.maxConcurrent,
     acpSubagentMaxIterations: settings?.acp?.subagentMaxIterations,
     acpDefaultModel: settings?.acp?.defaultModel,
+    toolModel: settings?.models?.toolModel,
     defaultTemperament: settings?.temperament?.default,
     // Context window management
     contextReservePercent: settings?.context?.reservePercent,

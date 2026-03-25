@@ -44,7 +44,7 @@ export function removeMcpServerConfig(name: string): void {
 export function setDefaultModel(modelId: string): void {
   const settings = readSettings();
   if (!settings.models) {
-    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: modelId, available: [] };
+    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: modelId, toolModel: null, available: [] };
   } else {
     settings.models.default = modelId;
   }
@@ -62,12 +62,56 @@ export function getCurrentModel(): string {
 }
 
 export async function syncAvailableModels(): Promise<void> {
-  const { listOllamaModels } = await import('../providers/ollama.js');
-  const models = await listOllamaModels();
+  const { listOllamaModelsDetailed } = await import('../providers/ollama.js');
+  const { classifyModels, selectToolModel } = await import('../providers/model-classifier.js');
+
+  const detailedModels = await listOllamaModelsDetailed();
+  const classified = classifyModels(detailedModels);
   const settings = readSettings();
+
   if (!settings.models) {
-    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: models[0] ?? '', available: [] };
+    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: '', toolModel: null, available: [] };
   }
-  settings.models!.available = models.map(m => ({ id: m, name: m }));
+
+  settings.models!.available = classified.map(m => ({
+    id: m.id,
+    name: m.id,
+    isCloud: m.isCloud,
+  }));
+
+  const { selectFastModel } = await import('../providers/model-classifier.js');
+  const hasLocal = classified.some(m => m.isLocal);
+  const hasCloud = classified.some(m => m.isCloud);
+  const currentDefault = settings.models!.default;
+  const currentDefaultIsCloud = classified.find(m => m.id === currentDefault)?.isCloud ?? false;
+
+  // Auto-configure toolModel if not manually set
+  if (!settings.models!.toolModel && hasLocal && hasCloud) {
+    if (currentDefaultIsCloud) {
+      // Default is cloud — set it as toolModel and switch default to best local
+      settings.models!.toolModel = currentDefault;
+      const fast = selectFastModel(classified);
+      if (fast) {
+        settings.models!.default = fast;
+      }
+    } else {
+      // Default is local — pick the best cloud as toolModel
+      const autoTool = selectToolModel(classified, currentDefault);
+      if (autoTool) {
+        settings.models!.toolModel = autoTool;
+      }
+    }
+  }
+
+  // If no default model set, pick the best local model (or first available)
+  if (!settings.models!.default && classified.length > 0) {
+    const fast = selectFastModel(classified);
+    if (fast) {
+      settings.models!.default = fast;
+    } else {
+      settings.models!.default = classified[0].id;
+    }
+  }
+
   writeSettings(settings);
 }

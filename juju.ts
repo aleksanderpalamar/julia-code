@@ -2,7 +2,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { App } from './src/tui/app.js';
-import { loadConfig } from './src/config/index.js';
+import { loadConfig, reloadConfig } from './src/config/index.js';
 import { getDb, closeDb } from './src/session/db.js';
 import { initProviders } from './src/providers/registry.js';
 import { initTools } from './src/tools/registry.js';
@@ -16,7 +16,8 @@ async function bootstrap() {
   loadConfig();
   getDb();          // Initialize database
   initProviders();  // Register LLM providers
-  await syncAvailableModels();  // Populate models.available from Ollama
+  await syncAvailableModels();  // Populate models.available from Ollama + auto-detect toolModel
+  reloadConfig();   // Reload config after sync (toolModel may have been auto-configured)
   initTools();      // Register tools
   initWorkspace();  // Create workspace directory
   await initMcpServers();  // Connect MCP servers and register their tools

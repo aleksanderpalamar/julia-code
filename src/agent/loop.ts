@@ -4,7 +4,7 @@ import type { ChatMessage, ToolCall, ChatChunk, TokenUsage } from '../providers/
 import { getProvider } from '../providers/registry.js';
 import { getToolSchemas, executeTool } from '../tools/registry.js';
 import { buildContext, getCompactableMessages, getEmergencyCompactableMessages } from './context.js';
-import { addMessage, saveCompaction, getLatestCompaction, addSessionTokens, getSession, updateSessionTitle, getMessageCount, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
+import { addMessage, removeLastAssistantMessage, saveCompaction, getLatestCompaction, addSessionTokens, getSession, updateSessionTitle, getMessageCount, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
 import { performStructuredCompaction, serializeCompaction, deserializeCompaction, type StructuredCompaction } from '../context/compaction.js';
@@ -28,6 +28,8 @@ export interface AgentEvents {
   context_health: [health: ContextHealth];
   usage: [usage: TokenUsage];
   title: [title: string];
+  model_switch: [model: string];
+  clear_streaming: [];
   done: [fullText: string];
   error: [error: string];
 }
@@ -76,8 +78,16 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     setCurrentSessionId(sessionId);
     setSubagentSessionId(sessionId);
     const config = getConfig();
-    const activeModel = model ?? config.defaultModel;
+    const requestedModel = model ?? config.defaultModel;
     const provider = getProvider('ollama');
+
+    // Auto-switch: use toolModel for the main loop (with tools), requestedModel for auxiliary ops
+    const loopModel = config.toolModel ?? requestedModel;
+    const auxModel = requestedModel;
+
+    if (loopModel !== requestedModel) {
+      this.emit('model_switch', loopModel);
+    }
 
     let toolSchemas = getToolSchemas();
     if (this.options.excludeTools?.length) {
@@ -94,25 +104,33 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       // Auto-orchestrate: analyze complexity and spawn subagents if needed
       if (config.acpEnabled && config.acpAutoOrchestrate && !this.options.excludeTools?.includes('subagent')) {
-        const orchestrated = await this.maybeOrchestrate(sessionId, userMessage, activeModel);
+        const orchestrated = await this.maybeOrchestrate(sessionId, userMessage, auxModel);
         if (orchestrated) {
           this.running = false;
           return;
         }
       }
 
-      // Check if compaction is needed before this run
-      await this.maybeCompact(sessionId, activeModel);
+      // Check if compaction is needed before this run (uses fast local model)
+      await this.maybeCompact(sessionId, auxModel);
 
       let iterations = 0;
       let currentBudget: ContextBudget | null = null;
+      const hasToolModel = loopModel !== auxModel;
+      let switchedToCloud = false;
 
       while (iterations < maxIterations) {
         iterations++;
         this.emit('thinking');
 
+        // Local-first routing: 1st iteration uses local model without tools,
+        // subsequent iterations (or after fallback) use cloud model with tools
+        const useLocalFirst = iterations === 1 && hasToolModel && !switchedToCloud;
+        const currentModel = useLocalFirst ? auxModel : loopModel;
+        const currentTools = useLocalFirst ? undefined : toolSchemas;
+
         // Build context fresh each iteration (now async with budget awareness)
-        const { messages, budget, health } = await buildContext(sessionId, activeModel, {
+        const { messages, budget, health } = await buildContext(sessionId, currentModel, {
           planMode: this.planMode,
           temperament: this.temperament,
           iteration: iterations,
@@ -127,9 +145,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         if (shouldEmergencyCompact(health)) {
           this.emit('compacting');
           const keepCount = getEmergencyKeepCount(health);
-          await this.performEmergencyCompaction(sessionId, activeModel, keepCount);
+          await this.performEmergencyCompaction(sessionId, auxModel, keepCount);
           // Rebuild context after emergency compaction
-          const rebuilt = await buildContext(sessionId, activeModel, {
+          const rebuilt = await buildContext(sessionId, currentModel, {
             planMode: this.planMode,
             temperament: this.temperament,
             iteration: iterations,
@@ -146,9 +164,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         const toolCalls: ToolCall[] = [];
 
         const stream = provider.chat({
-          model: activeModel,
+          model: currentModel,
           messages,
-          tools: toolSchemas,
+          tools: currentTools,
         });
 
         for await (const chunk of stream) {
@@ -175,14 +193,24 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           }
         }
 
+        // Local-first: check if local model response indicates tools are needed
+        if (useLocalFirst && toolCalls.length === 0 && needsToolCalling(fullText)) {
+          // Discard local response and retry with cloud + tools
+          this.emit('clear_streaming');
+          // Don't save the discarded response to DB — skip addMessage
+          switchedToCloud = true;
+          this.emit('model_switch', loopModel);
+          continue;
+        }
+
         // Save assistant message
         addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined);
 
         // If no tool calls, we're done
         if (toolCalls.length === 0) {
           this.emit('done', fullText);
-          // Generate title in background after first exchange
-          this.maybeGenerateTitle(sessionId, activeModel, userMessage, fullText);
+          // Generate title in background (uses fast local model)
+          this.maybeGenerateTitle(sessionId, auxModel, userMessage, fullText);
           this.running = false;
           return;
         }
@@ -579,4 +607,47 @@ Each subtask description must be self-contained with ALL context needed (file pa
   isRunning(): boolean {
     return this.running;
   }
+}
+
+/**
+ * Heuristic to detect if a local model's response indicates it needs tool access.
+ * When a small model can't use tools, it often says it can't access files/commands.
+ */
+function needsToolCalling(text: string): boolean {
+  const lower = text.toLowerCase();
+  const indicators = [
+    // Model says it can't do something tools would enable (pt-BR)
+    'não consigo acessar',
+    'não tenho acesso',
+    'não posso executar',
+    'não posso ler',
+    'não consigo ler',
+    'não consigo listar',
+    'não tenho capacidade',
+    'não consigo verificar',
+    'não tenho como',
+    'não posso acessar',
+    'sem acesso ao',
+    'sem acesso a ',
+    // Model suggests the user do something manually (pt-BR)
+    'você pode executar',
+    'execute o comando',
+    'rode o comando',
+    'tente rodar',
+    'você pode rodar',
+    'você pode usar o comando',
+    // English equivalents
+    'i cannot access',
+    'i cannot execute',
+    'i cannot read',
+    'i don\'t have access',
+    'i can\'t access',
+    'i can\'t read',
+    'i can\'t execute',
+    'i can\'t list',
+    'you can run',
+    'try running',
+    'you could run',
+  ];
+  return indicators.some(i => lower.includes(i));
 }

@@ -227,6 +227,22 @@ export async function listOllamaModels(): Promise<string[]> {
   }
 }
 
+/**
+ * List models with full details (including remote_model, details, etc.)
+ * Used for classifying models as local vs cloud.
+ */
+export async function listOllamaModelsDetailed(): Promise<import('./model-classifier.js').OllamaModelEntry[]> {
+  const { ollamaHost } = getConfig();
+  try {
+    const res = await fetch(`${ollamaHost}/api/tags`);
+    if (!res.ok) return [];
+    const data = await res.json() as { models?: import('./model-classifier.js').OllamaModelEntry[] };
+    return data.models ?? [];
+  } catch {
+    return [];
+  }
+}
+
 interface OllamaChatResponse {
   message?: {
     role: string;

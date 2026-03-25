@@ -30,9 +30,10 @@ interface Props {
   tokens: number;
   mode: AgentMode;
   temperament: Temperament;
+  toolModel?: string | null;
 }
 
-export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperament }: Props) {
+export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperament, toolModel }: Props) {
   const shortId = sessionId.slice(0, 8);
   const cwd = process.cwd();
   const { columns } = useTerminalSize();
@@ -84,6 +85,13 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
           <Box marginTop={1}>
             <Text>    </Text>
             <Text color="yellow">{model}</Text>
+            {toolModel && toolModel !== model && (
+              <>
+                <Text color="gray"> → </Text>
+                <Text color="green">{toolModel}</Text>
+                <Text color="gray"> (tools)</Text>
+              </>
+            )}
             <Text color="gray"> · </Text>
             <Text color="gray">session: {shortId}</Text>
             <Text color="gray"> · </Text>
