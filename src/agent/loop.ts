@@ -197,8 +197,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         if (useLocalFirst && toolCalls.length === 0 && needsToolCalling(fullText)) {
           // Discard local response and retry with cloud + tools
           this.emit('clear_streaming');
-          // Don't save the discarded response to DB — skip addMessage
           switchedToCloud = true;
+          this.emit('chunk', `🔄 Trocando para ${loopModel} para executar ferramentas...\n\n`);
           this.emit('model_switch', loopModel);
           continue;
         }
@@ -611,43 +611,47 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
 /**
  * Heuristic to detect if a local model's response indicates it needs tool access.
- * When a small model can't use tools, it often says it can't access files/commands.
+ * Detects 3 patterns:
+ * 1. Explicit refusal ("não consigo acessar...")
+ * 2. Simulated shell commands written as text (cat /etc/os-release)
+ * 3. Intent to act without action ("vou verificar...", "let me check...")
  */
 function needsToolCalling(text: string): boolean {
   const lower = text.toLowerCase();
-  const indicators = [
-    // Model says it can't do something tools would enable (pt-BR)
-    'não consigo acessar',
-    'não tenho acesso',
-    'não posso executar',
-    'não posso ler',
-    'não consigo ler',
-    'não consigo listar',
-    'não tenho capacidade',
-    'não consigo verificar',
-    'não tenho como',
-    'não posso acessar',
-    'sem acesso ao',
-    'sem acesso a ',
-    // Model suggests the user do something manually (pt-BR)
-    'você pode executar',
-    'execute o comando',
-    'rode o comando',
-    'tente rodar',
-    'você pode rodar',
-    'você pode usar o comando',
-    // English equivalents
-    'i cannot access',
-    'i cannot execute',
-    'i cannot read',
-    'i don\'t have access',
-    'i can\'t access',
-    'i can\'t read',
-    'i can\'t execute',
-    'i can\'t list',
-    'you can run',
-    'try running',
-    'you could run',
+
+  // Category 1: Explicit refusal
+  const refusalIndicators = [
+    'não consigo acessar', 'não tenho acesso', 'não posso executar',
+    'não posso ler', 'não consigo ler', 'não consigo listar',
+    'não tenho capacidade', 'não consigo verificar', 'não tenho como',
+    'não posso acessar', 'sem acesso ao', 'sem acesso a ',
+    'você pode executar', 'execute o comando', 'rode o comando',
+    'tente rodar', 'você pode rodar', 'você pode usar o comando',
+    'i cannot access', 'i cannot execute', 'i cannot read',
+    'i don\'t have access', 'i can\'t access', 'i can\'t read',
+    'i can\'t execute', 'i can\'t list', 'you can run',
+    'try running', 'you could run',
   ];
-  return indicators.some(i => lower.includes(i));
+  if (refusalIndicators.some(i => lower.includes(i))) return true;
+
+  // Category 2: Model writes shell commands as text (simulating execution)
+  const shellPatterns = [
+    /^\s*(?:cat|ls|cd|grep|find|echo|pwd|whoami|uname|head|tail|wc|mkdir|rm|cp|mv|chmod|curl|wget|pip|npm|git|python|node|docker)\s+\S/m,
+    /^\s*\$\s+\w+/m,
+    /```(?:bash|sh|shell|terminal|console|zsh)\n/i,
+  ];
+  if (shellPatterns.some(p => p.test(text))) return true;
+
+  // Category 3: Model expresses intent to act (but can't without tools)
+  const intentIndicators = [
+    'vou verificar', 'vou checar', 'deixa eu ver', 'deixe-me verificar',
+    'vou executar', 'vou rodar', 'vou ler o arquivo', 'vou listar',
+    'vou acessar', 'vou consultar', 'vou buscar',
+    'let me check', 'let me verify', 'let me run', 'let me read',
+    'let me look', 'let me see', 'i\'ll check', 'i\'ll run',
+    'i\'ll read', 'i\'ll look',
+  ];
+  if (intentIndicators.some(i => lower.includes(i))) return true;
+
+  return false;
 }
