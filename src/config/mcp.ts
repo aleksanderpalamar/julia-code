@@ -51,6 +51,24 @@ export function setDefaultModel(modelId: string): void {
   writeSettings(settings);
 }
 
+export function setToolModel(modelId: string): void {
+  const settings = readSettings();
+  if (!settings.models) {
+    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: '', toolModel: modelId, available: [] };
+  } else {
+    settings.models.toolModel = modelId;
+  }
+  writeSettings(settings);
+}
+
+export function clearToolModel(): void {
+  const settings = readSettings();
+  if (settings.models) {
+    settings.models.toolModel = null;
+  }
+  writeSettings(settings);
+}
+
 export function getAvailableModels(): Array<{ id: string; name?: string }> {
   const settings = readSettings();
   return settings.models?.available ?? [];

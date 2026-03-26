@@ -9,7 +9,11 @@ const commands: SlashCommand[] = [
     name: "/mode",
     description: "Cycle mode: Normal → Plan → Accept Edits (Shift+Tab)",
   },
-  { name: "/model", description: "Select Ollama model: /model [name]" },
+  { name: "/models", description: "Select Ollama model: /model [name]" },
+  {
+    name: "/toolmodels",
+    description: "Select tool model: /toolmodel [name|auto]",
+  },
   {
     name: "/temperament",
     description: "Set temperament: neutral | sharp | warm | auto",

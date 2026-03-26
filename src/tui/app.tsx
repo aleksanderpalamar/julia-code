@@ -30,6 +30,8 @@ import {
   getAvailableModels,
   getCurrentModel,
   setDefaultModel,
+  setToolModel,
+  clearToolModel,
 } from "../config/mcp.js";
 import {
   getMcpServerStatuses,
@@ -56,6 +58,7 @@ export function App({ sessionId }: Props) {
   const [pendingImageNames, setPendingImageNames] = useState<string[]>([]);
   const [showBtw, setShowBtw] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showToolModelPicker, setShowToolModelPicker] = useState(false);
 
   const { pasteInProgress } = useClipboardPaste({
     onImagePasted: (base64, name) => {
@@ -213,6 +216,36 @@ export function App({ sessionId }: Props) {
         return;
       }
 
+      // /toolmodel commands
+      if (text === "/toolmodel") {
+        setShowToolModelPicker(true);
+        return;
+      }
+
+      if (text.startsWith("/toolmodel ")) {
+        const name = text.slice("/toolmodel ".length).trim();
+        if (!name) {
+          addSystemEntry("Usage: /toolmodel [name|auto]");
+          return;
+        }
+        if (name === "auto") {
+          clearToolModel();
+          reloadConfig();
+          addSystemEntry("Tool model reset to auto-switch.");
+          return;
+        }
+        const available = getAvailableModels();
+        const match = available.find(m => m.id === name);
+        if (!match) {
+          addSystemEntry(`Model '${name}' not found. Use /toolmodel to see available models.`);
+          return;
+        }
+        setToolModel(name);
+        reloadConfig();
+        addSystemEntry(`Tool model switched to: ${name}`);
+        return;
+      }
+
       // /temperament commands
       if (text === "/temperament") {
         setTemperament(prev => {
@@ -321,6 +354,17 @@ export function App({ sessionId }: Props) {
     setShowModelPicker(false);
   }, []);
 
+  const handleToolModelSelect = useCallback((modelId: string) => {
+    setToolModel(modelId);
+    reloadConfig();
+    setShowToolModelPicker(false);
+    addSystemEntry(`Tool model switched to: ${modelId}`);
+  }, [addSystemEntry]);
+
+  const handleToolModelCancel = useCallback(() => {
+    setShowToolModelPicker(false);
+  }, []);
+
   const handleBtwSubmit = useCallback(
     (text: string) => {
       sendBtw(session.id, text);
@@ -397,6 +441,19 @@ export function App({ sessionId }: Props) {
           />
         </Box>
       )}
+      {showToolModelPicker && (
+        <Box paddingX={1}>
+          <ModelPicker
+            models={getAvailableModels().map(m => ({
+              id: m.id,
+              name: m.name,
+              current: m.id === (configToolModel ?? ''),
+            }))}
+            onSelect={handleToolModelSelect}
+            onCancel={handleToolModelCancel}
+          />
+        </Box>
+      )}
       {showBtw && (
         <Box paddingX={1}>
           <BtwInput onSubmit={handleBtwSubmit} onCancel={handleBtwCancel} />
@@ -405,7 +462,7 @@ export function App({ sessionId }: Props) {
       <Box paddingX={1} paddingY={0}>
         <Input
           onSubmit={handleSubmit}
-          disabled={isThinking || pendingApproval !== null || showModelPicker}
+          disabled={isThinking || pendingApproval !== null || showModelPicker || showToolModelPicker}
           model={model}
           isThinking={isThinking}
           tokens={sessionTokens.promptTokens + sessionTokens.completionTokens}
