@@ -18,6 +18,15 @@ import { sanitizeToolResult } from '../security/sanitize.js';
 import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
+export interface OrchestrationProgress {
+  runId: string;
+  total: number;
+  completed: number;
+  failed: number;
+  running: number;
+  queued: number;
+}
+
 export interface AgentEvents {
   thinking: [];
   chunk: [text: string];
@@ -30,6 +39,7 @@ export interface AgentEvents {
   title: [title: string];
   model_switch: [model: string];
   clear_streaming: [];
+  orchestration_progress: [progress: OrchestrationProgress];
   done: [fullText: string];
   error: [error: string];
 }
@@ -443,8 +453,59 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       this.emit('chunk', `\n⏳ Aguardando ${taskIds.length} subagentes...\n`);
 
+      // Track orchestration progress and emit updates
+      const total = taskIds.length;
+      let progressCompleted = 0;
+      let progressFailed = 0;
+
+      const emitProgress = () => {
+        const running = taskIds.filter(id => {
+          const t = manager.getTask(id);
+          return t?.status === 'running';
+        }).length;
+        const queued = taskIds.filter(id => {
+          const t = manager.getTask(id);
+          return t?.status === 'queued';
+        }).length;
+        this.emit('orchestration_progress', {
+          runId,
+          total,
+          completed: progressCompleted,
+          failed: progressFailed,
+          running,
+          queued,
+        });
+      };
+
+      const onTaskStarted = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        emitProgress();
+      };
+      const onTaskCompleted = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        progressCompleted++;
+        emitProgress();
+      };
+      const onTaskFailed = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        progressFailed++;
+        emitProgress();
+      };
+
+      manager.on('task:started', onTaskStarted);
+      manager.on('task:completed', onTaskCompleted);
+      manager.on('task:failed', onTaskFailed);
+
+      // Emit initial progress
+      emitProgress();
+
       // Wait for all to complete
       const results = await manager.waitTasks(taskIds);
+
+      // Clean up progress listeners
+      manager.off('task:started', onTaskStarted);
+      manager.off('task:completed', onTaskCompleted);
+      manager.off('task:failed', onTaskFailed);
 
       // Complete orchestration run in DB
       const orchestrationDuration = Date.now() - orchestrationStart;
