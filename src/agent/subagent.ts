@@ -183,6 +183,8 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     });
 
     agent.on('done', (fullText) => {
+      // Guard: ignore if already finalized (e.g. cancelled)
+      if (task.status === 'completed' || task.status === 'failed') return;
       const result = fullText || resultText;
       task.status = 'completed';
       task.result = result;
@@ -200,6 +202,8 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     });
 
     agent.on('error', (error) => {
+      // Guard: ignore if already finalized (e.g. cancelled)
+      if (task.status === 'completed' || task.status === 'failed') return;
       task.status = 'failed';
       task.error = error;
       task.completedAt = new Date();
@@ -217,6 +221,8 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
     // Fire and forget — events handle completion
     agent.run(task.sessionId, task.task, model).catch((err) => {
+      // Guard: ignore if already finalized (e.g. cancelled)
+      if (task.status === 'completed' || task.status === 'failed') return;
       const errorMsg = err instanceof Error ? err.message : String(err);
       task.status = 'failed';
       task.error = errorMsg;
