@@ -11,13 +11,13 @@ export function setSubagentSessionId(id: string): void {
 
 export const subagentTool: ToolDefinition = {
   name: 'subagent',
-  description: 'Spawn and manage subagents that run tasks in parallel. Each subagent is an independent agent with its own session and context. Actions: "spawn" creates one subagent, "spawn_many" creates multiple, "status" checks a task, "list" lists all tasks, "wait" waits for tasks to complete and returns results, "runs" lists orchestration run history.',
+  description: 'Spawn and manage subagents that run tasks in parallel. Each subagent is an independent agent with its own session and context. Actions: "spawn" creates one subagent, "spawn_many" creates multiple, "status" checks a task, "list" lists all tasks, "wait" waits for tasks to complete and returns results, "runs" lists orchestration run history, "cancel" cancels a specific task, "cancel_all" cancels all running/queued tasks.',
   parameters: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
-        enum: ['spawn', 'spawn_many', 'status', 'list', 'wait', 'runs'],
+        enum: ['spawn', 'spawn_many', 'status', 'list', 'wait', 'runs', 'cancel', 'cancel_all'],
         description: 'Action to perform',
       },
       task: {
@@ -166,8 +166,25 @@ export const subagentTool: ToolDefinition = {
         return { success: true, output: `${runs.length} orchestration runs:\n${lines.join('\n')}` };
       }
 
+      case 'cancel': {
+        const taskId = args.task_id as string;
+        if (!taskId) {
+          return { success: false, output: '', error: '"task_id" is required for cancel action' };
+        }
+        const cancelled = manager.cancelTask(taskId);
+        if (cancelled) {
+          return { success: true, output: `Task ${taskId} cancelled.` };
+        }
+        return { success: false, output: '', error: `Task "${taskId}" not found or already finished.` };
+      }
+
+      case 'cancel_all': {
+        const count = manager.cancelAll(currentSessionId);
+        return { success: true, output: `${count} task(s) cancelled.` };
+      }
+
       default:
-        return { success: false, output: '', error: `Unknown action: ${action}. Use "spawn", "spawn_many", "status", "list", "wait", or "runs".` };
+        return { success: false, output: '', error: `Unknown action: ${action}. Use "spawn", "spawn_many", "status", "list", "wait", "runs", "cancel", or "cancel_all".` };
     }
   },
 };

@@ -35,6 +35,7 @@ type QueuedItem = {
 
 class SubagentManager extends EventEmitter<SubagentEvents> {
   private tasks = new Map<string, SubagentTask>();
+  private agents = new Map<string, AgentLoop>();
   private running = 0;
   private queue: QueuedItem[] = [];
   private sessionPool: string[] = [];
@@ -172,6 +173,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       maxIterations: config.acpSubagentMaxIterations,
       excludeTools: ['subagent'], // Prevent recursive subagent spawning
     });
+    this.agents.set(task.id, agent);
 
     let resultText = '';
 
@@ -191,6 +193,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         durationMs: task.durationMs,
         result: task.result,
       });
+      this.agents.delete(task.id);
       this.running--;
       this.emit('task:completed', task.id, result);
       this.drainQueue();
@@ -206,6 +209,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         durationMs: task.durationMs,
         error: task.error,
       });
+      this.agents.delete(task.id);
       this.running--;
       this.emit('task:failed', task.id, error);
       this.drainQueue();
@@ -223,10 +227,55 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         durationMs: task.durationMs,
         error: task.error,
       });
+      this.agents.delete(task.id);
       this.running--;
       this.emit('task:failed', task.id, errorMsg);
       this.drainQueue();
     });
+  }
+
+  /** Cancel a running or queued sub-agent. Returns true if the task was found and cancelled. */
+  cancelTask(taskId: string): boolean {
+    const task = this.tasks.get(taskId);
+    if (!task || task.status === 'completed' || task.status === 'failed') return false;
+
+    // If running, abort the agent loop
+    const agent = this.agents.get(taskId);
+    if (agent) {
+      agent.abort();
+      this.agents.delete(taskId);
+      this.running--;
+    }
+
+    // If queued, remove from queue
+    const queueIdx = this.queue.findIndex(item => item.task.id === taskId);
+    if (queueIdx >= 0) {
+      this.queue.splice(queueIdx, 1);
+    }
+
+    task.status = 'failed';
+    task.error = 'Cancelled';
+    task.completedAt = new Date();
+    task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
+    updateSubagentRunStatus(task.id, 'failed', {
+      completedAt: task.completedAt.toISOString(),
+      durationMs: task.durationMs,
+      error: 'Cancelled',
+    });
+    this.emit('task:failed', task.id, 'Cancelled');
+    this.drainQueue();
+    return true;
+  }
+
+  /** Cancel all running and queued sub-agents for a given parent session. Returns number cancelled. */
+  cancelAll(parentSessionId: string): number {
+    let cancelled = 0;
+    for (const [taskId, task] of this.tasks) {
+      if (task.parentSessionId === parentSessionId && (task.status === 'running' || task.status === 'queued')) {
+        if (this.cancelTask(taskId)) cancelled++;
+      }
+    }
+    return cancelled;
   }
 
   private drainQueue(): void {
