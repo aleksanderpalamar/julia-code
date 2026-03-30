@@ -404,12 +404,20 @@ Each subtask description must be self-contained with ALL context needed (file pa
       this.emit('chunk', `🔀 Tarefa complexa detectada — spawnando ${analysis.subtasks.length} subagentes... (run: ${runId.slice(0, 8)})\n\n`);
 
       const manager = getSubagentManager();
-      const taskIds: string[] = [];
 
-      for (const sub of analysis.subtasks) {
-        const subModel = (sub.model && sub.model !== 'null') ? sub.model : undefined;
-        const id = await manager.spawn(sessionId, sub.task, runId, subModel);
-        taskIds.push(id);
+      // Pre-warm sessions to eliminate DB writes from spawn critical path
+      manager.prewarm(analysis.subtasks.length);
+
+      // Build subtask descriptors and spawn in parallel
+      const subtaskDescriptors = analysis.subtasks.map(sub => ({
+        task: sub.task,
+        model: (sub.model && sub.model !== 'null') ? sub.model : undefined,
+      }));
+
+      const taskIds = await manager.spawnMany(sessionId, subtaskDescriptors, runId);
+
+      for (let i = 0; i < analysis.subtasks.length; i++) {
+        const sub = analysis.subtasks[i];
         this.emit('chunk', `  → Subagente: ${sub.task.slice(0, 80)}${sub.model ? ` [${sub.model}]` : ''}\n`);
       }
 
