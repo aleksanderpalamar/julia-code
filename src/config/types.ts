@@ -14,6 +14,7 @@ export const ConfigSchema = z.object({
   acpMaxConcurrent: z.number().default(3),
   acpSubagentMaxIterations: z.number().default(20),
   acpDefaultModel: z.string().nullable().default(null),
+  acpCancelOnFailure: z.boolean().default(false),
   // Auto-switch: modelo dedicado para tool calling (cloud/capaz)
   toolModel: z.string().nullable().default(null),
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
@@ -71,6 +72,7 @@ export const SettingsSchema = z.object({
     maxConcurrent: z.number().default(3),
     subagentMaxIterations: z.number().default(15),
     defaultModel: z.string().nullable().default(null),
+    cancelOnFailure: z.boolean().default(false),
   }).optional(),
   temperament: z.object({
     default: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),

@@ -46,10 +46,19 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   private temperament = 'neutral';
   private approvedAllForSession = false;
   private allowRules: AllowRule[] = [];
+  private abortController: AbortController | null = null;
 
   constructor(options?: AgentLoopOptions) {
     super();
     this.options = options ?? {};
+  }
+
+  /** Abort the current agent run. Stops iteration and emits error. */
+  abort(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    this.running = false;
   }
 
   setAllowRules(rules: AllowRule[]): void {
@@ -75,6 +84,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     }
 
     this.running = true;
+    this.abortController = new AbortController();
     setCurrentSessionId(sessionId);
     setSubagentSessionId(sessionId);
     const config = getConfig();
@@ -120,6 +130,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       let switchedToCloud = false;
 
       while (iterations < maxIterations) {
+        if (this.abortController?.signal.aborted) {
+          this.emit('error', 'Aborted');
+          this.running = false;
+          return;
+        }
         iterations++;
         this.emit('thinking');
 
@@ -217,6 +232,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         // Execute tool calls and save results
         for (const tc of toolCalls) {
+          if (this.abortController?.signal.aborted) {
+            this.emit('error', 'Aborted');
+            this.running = false;
+            return;
+          }
           const toolName = tc.function.name;
           const toolArgs = tc.function.arguments;
 
