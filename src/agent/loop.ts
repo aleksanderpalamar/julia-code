@@ -40,6 +40,8 @@ export interface AgentEvents {
   model_switch: [model: string];
   clear_streaming: [];
   orchestration_progress: [progress: OrchestrationProgress];
+  subagent_chunk: [taskId: string, label: string, text: string];
+  subagent_status: [taskId: string, label: string, status: string, durationMs?: number];
   done: [fullText: string];
   error: [error: string];
 }
@@ -446,12 +448,45 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       const taskIds = await manager.spawnMany(sessionId, subtaskDescriptors, runId);
 
+      // Build taskId → label map for live streaming
+      const taskLabels = new Map<string, string>();
       for (let i = 0; i < analysis.subtasks.length; i++) {
         const sub = analysis.subtasks[i];
+        const label = sub.task.slice(0, 60).replace(/\n/g, ' ');
+        taskLabels.set(taskIds[i], label);
         this.emit('chunk', `  → Subagente: ${sub.task.slice(0, 80)}${sub.model ? ` [${sub.model}]` : ''}\n`);
       }
 
       this.emit('chunk', `\n⏳ Aguardando ${taskIds.length} subagentes...\n`);
+
+      // Forward sub-agent chunks and status changes to the TUI
+      const onSubagentChunk = (taskId: string, text: string) => {
+        if (!taskIds.includes(taskId)) return;
+        const label = taskLabels.get(taskId) ?? 'subagent';
+        this.emit('subagent_chunk', taskId, label, text);
+      };
+      const onSubagentStarted = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        const label = taskLabels.get(taskId) ?? 'subagent';
+        this.emit('subagent_status', taskId, label, 'started');
+      };
+      const onSubagentCompleted = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        const label = taskLabels.get(taskId) ?? 'subagent';
+        const task = manager.getTask(taskId);
+        this.emit('subagent_status', taskId, label, 'completed', task?.durationMs);
+      };
+      const onSubagentFailed = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        const label = taskLabels.get(taskId) ?? 'subagent';
+        const task = manager.getTask(taskId);
+        this.emit('subagent_status', taskId, label, 'failed', task?.durationMs);
+      };
+
+      manager.on('task:chunk', onSubagentChunk);
+      manager.on('task:started', onSubagentStarted);
+      manager.on('task:completed', onSubagentCompleted);
+      manager.on('task:failed', onSubagentFailed);
 
       // Track orchestration progress and emit updates
       const total = taskIds.length;
@@ -502,10 +537,14 @@ Each subtask description must be self-contained with ALL context needed (file pa
       // Wait for all to complete
       const results = await manager.waitTasks(taskIds);
 
-      // Clean up progress listeners
+      // Clean up listeners
       manager.off('task:started', onTaskStarted);
       manager.off('task:completed', onTaskCompleted);
       manager.off('task:failed', onTaskFailed);
+      manager.off('task:chunk', onSubagentChunk);
+      manager.off('task:started', onSubagentStarted);
+      manager.off('task:completed', onSubagentCompleted);
+      manager.off('task:failed', onSubagentFailed);
 
       // Complete orchestration run in DB
       const orchestrationDuration = Date.now() - orchestrationStart;

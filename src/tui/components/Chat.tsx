@@ -4,11 +4,12 @@ import { Markdown } from './Markdown.js';
 import { ToolOutput } from './ToolOutput.js';
 
 export interface ChatEntry {
-  type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'system' | 'btw';
+  type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'system' | 'btw' | 'subagent_stream';
   content: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolSuccess?: boolean;
+  subagentLabel?: string;
 }
 
 function formatToolCall(name: string, args?: Record<string, unknown>): string {
@@ -56,6 +57,12 @@ export function Chat({ entries, streamingText }: Props) {
           )}
           {entry.type === 'error' && (
             <Text color="red">Error: {entry.content}</Text>
+          )}
+          {entry.type === 'subagent_stream' && (
+            <Box flexDirection="column">
+              <Text color="cyan" dimColor bold>[{entry.subagentLabel ?? 'subagent'}]</Text>
+              <Text dimColor>{entry.content}</Text>
+            </Box>
           )}
           {entry.type === 'system' && (
             <Text color="gray">{entry.content}</Text>

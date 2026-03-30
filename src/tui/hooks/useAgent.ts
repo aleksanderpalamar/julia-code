@@ -124,6 +124,33 @@ export function useAgent(onSessionChanged?: () => void) {
       setOrchestrationProgress(progress);
     };
 
+    const onSubagentChunk = (taskId: string, label: string, text: string) => {
+      setEntries(e => {
+        // Find existing subagent_stream entry for this taskId, or create one
+        const existingIdx = e.findIndex(
+          entry => entry.type === 'subagent_stream' && entry.toolName === taskId
+        );
+        if (existingIdx >= 0) {
+          const updated = [...e];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            content: updated[existingIdx].content + text,
+          };
+          return updated;
+        }
+        return [...e, { type: 'subagent_stream', content: text, subagentLabel: label, toolName: taskId }];
+      });
+    };
+
+    const onSubagentStatus = (taskId: string, label: string, status: string, durationMs?: number) => {
+      const dur = durationMs !== undefined ? ` (${(durationMs / 1000).toFixed(1)}s)` : '';
+      const icon = status === 'completed' ? '✓' : status === 'failed' ? '✗' : '▸';
+      setEntries(e => [...e, {
+        type: 'system',
+        content: `${icon} [${label}] ${status}${dur}`,
+      }]);
+    };
+
     agent.on('thinking', onThinking);
     agent.on('chunk', onChunk);
     agent.on('tool_call', onToolCall);
@@ -135,6 +162,8 @@ export function useAgent(onSessionChanged?: () => void) {
     agent.on('model_switch', onModelSwitch);
     agent.on('clear_streaming', onClearStreaming);
     agent.on('orchestration_progress', onOrchestrationProgress);
+    agent.on('subagent_chunk', onSubagentChunk);
+    agent.on('subagent_status', onSubagentStatus);
     agent.on('done', onDone);
     agent.on('error', onError);
 
@@ -148,6 +177,8 @@ export function useAgent(onSessionChanged?: () => void) {
       agent.off('model_switch', onModelSwitch);
       agent.off('clear_streaming', onClearStreaming);
       agent.off('orchestration_progress', onOrchestrationProgress);
+      agent.off('subagent_chunk', onSubagentChunk);
+      agent.off('subagent_status', onSubagentStatus);
       agent.off('usage', onUsage);
       agent.off('title', onTitle);
       agent.off('done', onDone);
