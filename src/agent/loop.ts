@@ -477,6 +477,10 @@ Each subtask description must be self-contained with ALL context needed (file pa
         });
       };
 
+      const onTaskStarted = (taskId: string) => {
+        if (!taskIds.includes(taskId)) return;
+        emitProgress();
+      };
       const onTaskCompleted = (taskId: string) => {
         if (!taskIds.includes(taskId)) return;
         progressCompleted++;
@@ -488,6 +492,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
         emitProgress();
       };
 
+      manager.on('task:started', onTaskStarted);
       manager.on('task:completed', onTaskCompleted);
       manager.on('task:failed', onTaskFailed);
 
@@ -498,6 +503,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const results = await manager.waitTasks(taskIds);
 
       // Clean up progress listeners
+      manager.off('task:started', onTaskStarted);
       manager.off('task:completed', onTaskCompleted);
       manager.off('task:failed', onTaskFailed);
 
