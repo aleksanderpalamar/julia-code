@@ -540,8 +540,53 @@ Each subtask description must be self-contained with ALL context needed (file pa
       // Emit initial progress now that IDs are known
       emitProgress();
 
-      // Wait for all to complete
-      const results = await manager.waitTasks(taskIds);
+      // Incremental result streaming: emit each sub-agent's result as it finishes
+      const resultLines: string[] = [];
+      const taskIdToIndex = new Map(taskIds.map((id, i) => [id, i]));
+      let earlyCompleted = 0;
+      let earlyFailed = 0;
+
+      const results = await new Promise<import('./subagent.js').SubagentTask[]>((resolveAll) => {
+        let doneCount = 0;
+
+        const onEarlyResult = (taskId: string) => {
+          if (!taskIds.includes(taskId)) return;
+          doneCount++;
+
+          const task = manager.getTask(taskId)!;
+          const idx = taskIdToIndex.get(taskId)!;
+          const subDesc = analysis.subtasks![idx]?.task.slice(0, 60) ?? `subtask ${idx + 1}`;
+
+          if (task.status === 'completed') {
+            earlyCompleted++;
+            const line = `### Subtask ${idx + 1}: ${subDesc}\n${task.result ?? '(no output)'}`;
+            resultLines[idx] = line;
+            this.emit('chunk', `\n${line}\n`);
+          } else {
+            earlyFailed++;
+            const line = `### Subtask ${idx + 1}: ${subDesc}\n❌ Failed: ${task.error ?? 'unknown error'}`;
+            resultLines[idx] = line;
+            this.emit('chunk', `\n${line}\n`);
+          }
+
+          if (doneCount === taskIds.length) {
+            manager.off('task:completed', onEarlyResult);
+            manager.off('task:failed', onEarlyResult);
+            resolveAll(taskIds.map(id => manager.getTask(id)!));
+          }
+        };
+
+        manager.on('task:completed', onEarlyResult);
+        manager.on('task:failed', onEarlyResult);
+
+        // Check if any already finished before we subscribed
+        for (const id of taskIds) {
+          const t = manager.getTask(id);
+          if (t && (t.status === 'completed' || t.status === 'failed')) {
+            onEarlyResult(id);
+          }
+        }
+      });
 
       // Clean up listeners
       manager.off('task:started', onTaskStarted);
@@ -557,74 +602,56 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const allDone = results.every(r => r.status === 'completed');
       completeOrchestrationRun(runId, allDone ? 'completed' : 'failed', orchestrationDuration);
 
-      // Build a summary of results
-      const resultLines: string[] = [];
-      let allSuccess = true;
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        const subDesc = analysis.subtasks[i]?.task.slice(0, 60) ?? `subtask ${i + 1}`;
-        if (r.status === 'completed') {
-          resultLines.push(`### Subtask ${i + 1}: ${subDesc}\n${r.result ?? '(no output)'}`);
-        } else {
-          allSuccess = false;
-          resultLines.push(`### Subtask ${i + 1}: ${subDesc}\n❌ Failed: ${r.error ?? 'unknown error'}`);
-        }
-      }
-
-      const completed = results.filter(r => r.status === 'completed').length;
-      const failed = results.filter(r => r.status === 'failed').length;
+      const completed = earlyCompleted;
+      const failed = earlyFailed;
 
       this.emit('chunk', `\n✅ ${completed} completados, ${failed > 0 ? `❌ ${failed} falharam` : 'nenhuma falha'}\n\n`);
 
-      // Synthesize results — use a direct LLM call (not buildContext) to keep it lean
+      // Conditional synthesis: only call LLM if there are failures requiring explanation
       let synthesisText = '';
-      try {
-        const synthesisMessages: ChatMessage[] = [
-          {
-            role: 'system',
-            content: 'You are a helpful assistant. The user gave a task that was split into subtasks and executed in parallel by subagents. Synthesize the results into a clear, cohesive response. Mention what was done successfully and any failures. Be concise and direct. Respond in the same language the user used.',
-          },
-          {
-            role: 'user',
-            content: `Original request: "${userMessage}"\n\nSubagent results:\n\n${resultLines.join('\n\n---\n\n')}`,
-          },
-        ];
+      if (failed > 0) {
+        try {
+          const synthesisMessages: ChatMessage[] = [
+            {
+              role: 'system',
+              content: 'You are a helpful assistant. The user gave a task that was split into subtasks and executed in parallel by subagents. Some subtasks failed. Briefly explain what succeeded and what went wrong, and suggest how to fix the failures. Be concise and direct. Respond in the same language the user used.',
+            },
+            {
+              role: 'user',
+              content: `Original request: "${userMessage}"\n\nSubagent results:\n\n${resultLines.filter(Boolean).join('\n\n---\n\n')}`,
+            },
+          ];
 
-        const synthStream = provider.chat({
-          model,
-          messages: synthesisMessages,
-        });
+          const synthStream = provider.chat({
+            model,
+            messages: synthesisMessages,
+          });
 
-        for await (const chunk of synthStream) {
-          if (chunk.type === 'text' && chunk.text) {
-            synthesisText += chunk.text;
-            this.emit('chunk', chunk.text);
+          for await (const chunk of synthStream) {
+            if (chunk.type === 'text' && chunk.text) {
+              synthesisText += chunk.text;
+              this.emit('chunk', chunk.text);
+            }
+            if (chunk.type === 'done' && chunk.usage) {
+              const totalTokens = chunk.usage.promptTokens + chunk.usage.completionTokens;
+              addSessionTokens(sessionId, totalTokens);
+              this.emit('usage', chunk.usage);
+            }
+            if (chunk.type === 'error') {
+              break;
+            }
           }
-          if (chunk.type === 'done' && chunk.usage) {
-            const total = chunk.usage.promptTokens + chunk.usage.completionTokens;
-            addSessionTokens(sessionId, total);
-            this.emit('usage', chunk.usage);
-          }
-          if (chunk.type === 'error') {
-            // Synthesis LLM failed — fall through to raw output
-            break;
-          }
+        } catch {
+          // Synthesis failed — results were already streamed incrementally
         }
-      } catch {
-        // Synthesis failed — we'll emit raw results below
-      }
-
-      // If synthesis produced nothing, emit the raw results directly
-      if (!synthesisText.trim()) {
-        synthesisText = `Resultados dos subagentes:\n\n${resultLines.join('\n\n---\n\n')}`;
-        this.emit('chunk', synthesisText);
       }
 
       // Save the full orchestration output as assistant message
-      const fullOutput = `🔀 ${analysis.subtasks.length} subagentes executados (${completed} ok, ${failed} falhas)\n\n${synthesisText}`;
+      const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
+      const fullOutput = `🔀 ${analysis.subtasks.length} subagentes executados (${completed} ok, ${failed} falhas)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
       addMessage(sessionId, 'assistant', fullOutput);
       this.emit('done', fullOutput);
-      this.maybeGenerateTitle(sessionId, model, userMessage, synthesisText);
+      this.maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500));
       return true;
     } catch (err) {
       // Orchestration failed — fall through to normal execution
