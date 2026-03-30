@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { AgentLoop } from './loop.js';
 import { createSession, createSubagentRun, updateSubagentRunStatus } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
@@ -19,20 +20,26 @@ export interface SubagentTask {
   durationMs?: number;
 }
 
+export interface SubagentEvents {
+  'task:queued': [taskId: string, label: string];
+  'task:started': [taskId: string, label: string];
+  'task:completed': [taskId: string, result: string];
+  'task:failed': [taskId: string, error: string];
+  'task:chunk': [taskId: string, text: string];
+}
+
 type QueuedItem = {
   task: SubagentTask;
   model?: string;
-  resolve: (taskId: string) => void;
 };
 
-class SubagentManager {
+class SubagentManager extends EventEmitter<SubagentEvents> {
   private tasks = new Map<string, SubagentTask>();
   private running = 0;
-  private maxConcurrent: number;
   private queue: QueuedItem[] = [];
 
   constructor() {
-    this.maxConcurrent = getConfig().acpMaxConcurrent;
+    super();
   }
 
   async spawn(parentSessionId: string, taskDescription: string | unknown, runId: string, model?: string): Promise<string> {
@@ -59,14 +66,14 @@ class SubagentManager {
     // Persist to DB
     createSubagentRun(taskId, runId, session.id, desc, resolvedModel);
 
-    if (this.running < this.maxConcurrent) {
+    this.emit('task:queued', taskId, preview);
+
+    const maxConcurrent = config.acpMaxConcurrent;
+    if (this.running < maxConcurrent) {
       this.runTask(task, resolvedModel);
     } else {
       // Queue it — will be started when a slot opens
-      return new Promise<string>((resolve) => {
-        this.queue.push({ task, model: resolvedModel, resolve });
-        resolve(taskId); // Return task ID immediately, task stays queued
-      });
+      this.queue.push({ task, model: resolvedModel });
     }
 
     return taskId;
@@ -92,51 +99,50 @@ class SubagentManager {
 
   async waitAll(parentSessionId: string): Promise<SubagentTask[]> {
     const tasks = this.listTasks(parentSessionId);
-    const pending = tasks.filter(t => t.status === 'queued' || t.status === 'running');
+    const pendingIds = tasks
+      .filter(t => t.status === 'queued' || t.status === 'running')
+      .map(t => t.id);
 
-    if (pending.length === 0) return tasks;
+    if (pendingIds.length === 0) return tasks;
 
-    // Poll until all are done
-    return new Promise((resolve) => {
-      const check = () => {
-        const allDone = pending.every(t => {
-          const current = this.tasks.get(t.id);
-          return current && (current.status === 'completed' || current.status === 'failed');
-        });
-        if (allDone) {
-          resolve(this.listTasks(parentSessionId));
-        } else {
-          setTimeout(check, 500);
-        }
-      };
-      check();
-    });
+    await this.waitTasks(pendingIds);
+    return this.listTasks(parentSessionId);
   }
 
   async waitTasks(taskIds: string[]): Promise<SubagentTask[]> {
+    const pending = new Set(taskIds.filter(id => {
+      const t = this.tasks.get(id);
+      return !t || t.status === 'queued' || t.status === 'running';
+    }));
+
+    if (pending.size === 0) {
+      return taskIds.map(id => this.tasks.get(id)!);
+    }
+
     return new Promise((resolve) => {
-      const check = () => {
-        const allDone = taskIds.every(id => {
-          const t = this.tasks.get(id);
-          return t && (t.status === 'completed' || t.status === 'failed');
-        });
-        if (allDone) {
+      const onDone = (taskId: string) => {
+        pending.delete(taskId);
+        if (pending.size === 0) {
+          this.off('task:completed', onDone);
+          this.off('task:failed', onDone);
           resolve(taskIds.map(id => this.tasks.get(id)!));
-        } else {
-          setTimeout(check, 500);
         }
       };
-      check();
+      this.on('task:completed', onDone);
+      this.on('task:failed', onDone);
     });
   }
 
   private runTask(task: SubagentTask, model?: string): void {
+    const label = task.task.slice(0, 60).replace(/\n/g, ' ');
     task.status = 'running';
     task.startedAt = new Date();
     this.running++;
 
     // Persist running status
     updateSubagentRunStatus(task.id, 'running', { startedAt: task.startedAt.toISOString() });
+
+    this.emit('task:started', task.id, label);
 
     const config = getConfig();
     const agent = new AgentLoop({
@@ -148,11 +154,13 @@ class SubagentManager {
 
     agent.on('chunk', (text) => {
       resultText += text;
+      this.emit('task:chunk', task.id, text);
     });
 
     agent.on('done', (fullText) => {
+      const result = fullText || resultText;
       task.status = 'completed';
-      task.result = fullText || resultText;
+      task.result = result;
       task.completedAt = new Date();
       task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
       updateSubagentRunStatus(task.id, 'completed', {
@@ -161,6 +169,7 @@ class SubagentManager {
         result: task.result,
       });
       this.running--;
+      this.emit('task:completed', task.id, result);
       this.drainQueue();
     });
 
@@ -175,13 +184,15 @@ class SubagentManager {
         error: task.error,
       });
       this.running--;
+      this.emit('task:failed', task.id, error);
       this.drainQueue();
     });
 
     // Fire and forget — events handle completion
     agent.run(task.sessionId, task.task, model).catch((err) => {
+      const errorMsg = err instanceof Error ? err.message : String(err);
       task.status = 'failed';
-      task.error = err instanceof Error ? err.message : String(err);
+      task.error = errorMsg;
       task.completedAt = new Date();
       task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
       updateSubagentRunStatus(task.id, 'failed', {
@@ -190,12 +201,14 @@ class SubagentManager {
         error: task.error,
       });
       this.running--;
+      this.emit('task:failed', task.id, errorMsg);
       this.drainQueue();
     });
   }
 
   private drainQueue(): void {
-    while (this.running < this.maxConcurrent && this.queue.length > 0) {
+    const maxConcurrent = getConfig().acpMaxConcurrent;
+    while (this.running < maxConcurrent && this.queue.length > 0) {
       const item = this.queue.shift()!;
       this.runTask(item.task, item.model);
     }
