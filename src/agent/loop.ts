@@ -547,11 +547,12 @@ Each subtask description must be self-contained with ALL context needed (file pa
       let earlyFailed = 0;
 
       const results = await new Promise<import('./subagent.js').SubagentTask[]>((resolveAll) => {
-        let doneCount = 0;
+        const seen = new Set<string>();
 
         const onEarlyResult = (taskId: string) => {
           if (!taskIds.includes(taskId)) return;
-          doneCount++;
+          if (seen.has(taskId)) return; // Deduplicate: event + manual scan
+          seen.add(taskId);
 
           const task = manager.getTask(taskId)!;
           const idx = taskIdToIndex.get(taskId)!;
@@ -569,7 +570,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
             this.emit('chunk', `\n${line}\n`);
           }
 
-          if (doneCount === taskIds.length) {
+          if (seen.size === taskIds.length) {
             manager.off('task:completed', onEarlyResult);
             manager.off('task:failed', onEarlyResult);
             resolveAll(taskIds.map(id => manager.getTask(id)!));
