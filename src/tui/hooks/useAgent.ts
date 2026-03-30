@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AgentLoop } from '../../agent/loop.js';
+import type { OrchestrationProgress } from '../../agent/loop.js';
 import { AgentQueue } from '../../agent/queue.js';
 import { addMessage } from '../../session/manager.js';
 import type { ChatEntry } from '../components/Chat.js';
@@ -21,6 +22,7 @@ export function useAgent(onSessionChanged?: () => void) {
   const [sessionTokens, setSessionTokens] = useState({ promptTokens: 0, completionTokens: 0 });
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [activeToolModel, setActiveToolModel] = useState<string | null>(null);
+  const [orchestrationProgress, setOrchestrationProgress] = useState<OrchestrationProgress | null>(null);
   const queueRef = useRef<AgentQueue | null>(null);
   const onSessionChangedRef = useRef(onSessionChanged);
   onSessionChangedRef.current = onSessionChanged;
@@ -72,6 +74,7 @@ export function useAgent(onSessionChanged?: () => void) {
 
     const onDone = (fullText: string) => {
       setIsThinking(false);
+      setOrchestrationProgress(null);
       setStreamingText(prev => {
         if (prev.trim()) {
           setEntries(e => [...e, { type: 'assistant', content: prev }]);
@@ -117,6 +120,10 @@ export function useAgent(onSessionChanged?: () => void) {
       });
     };
 
+    const onOrchestrationProgress = (progress: OrchestrationProgress) => {
+      setOrchestrationProgress(progress);
+    };
+
     agent.on('thinking', onThinking);
     agent.on('chunk', onChunk);
     agent.on('tool_call', onToolCall);
@@ -127,6 +134,7 @@ export function useAgent(onSessionChanged?: () => void) {
     agent.on('title', onTitle);
     agent.on('model_switch', onModelSwitch);
     agent.on('clear_streaming', onClearStreaming);
+    agent.on('orchestration_progress', onOrchestrationProgress);
     agent.on('done', onDone);
     agent.on('error', onError);
 
@@ -139,6 +147,7 @@ export function useAgent(onSessionChanged?: () => void) {
       agent.off('approval_needed', onApprovalNeeded);
       agent.off('model_switch', onModelSwitch);
       agent.off('clear_streaming', onClearStreaming);
+      agent.off('orchestration_progress', onOrchestrationProgress);
       agent.off('usage', onUsage);
       agent.off('title', onTitle);
       agent.off('done', onDone);
@@ -189,5 +198,5 @@ export function useAgent(onSessionChanged?: () => void) {
     }
   }, [pendingApproval]);
 
-  return { entries, streamingText, isThinking, sessionTokens, activeToolModel, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval };
+  return { entries, streamingText, isThinking, sessionTokens, activeToolModel, orchestrationProgress, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval };
 }

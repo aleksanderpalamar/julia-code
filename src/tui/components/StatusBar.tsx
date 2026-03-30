@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentMode, Temperament } from "../types.js";
+import type { OrchestrationProgress } from "../../agent/loop.js";
 import { modeLabel, modeColor, temperamentLabel, temperamentColor } from "../types.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { getBreakpoint } from "../responsive.js";
@@ -31,9 +32,10 @@ interface Props {
   mode: AgentMode;
   temperament: Temperament;
   toolModel?: string | null;
+  orchestrationProgress?: OrchestrationProgress | null;
 }
 
-export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperament, toolModel }: Props) {
+export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperament, toolModel, orchestrationProgress }: Props) {
   const shortId = sessionId.slice(0, 8);
   const cwd = process.cwd();
   const { columns } = useTerminalSize();
@@ -108,7 +110,18 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
                 <Text color={temperamentColor(temperament)} bold>{temperamentLabel(temperament)}</Text>
               </>
             )}
-            {isThinking && (
+            {orchestrationProgress && (
+              <>
+                <Text color="gray"> · </Text>
+                <Text color="cyan">
+                  <Spinner type="dots" /> ACP [{orchestrationProgress.completed}/{orchestrationProgress.total} done
+                  {orchestrationProgress.running > 0 ? `, ${orchestrationProgress.running} running` : ''}
+                  {orchestrationProgress.queued > 0 ? `, ${orchestrationProgress.queued} queued` : ''}
+                  {orchestrationProgress.failed > 0 ? `, ${orchestrationProgress.failed} failed` : ''}]
+                </Text>
+              </>
+            )}
+            {isThinking && !orchestrationProgress && (
               <>
                 <Text color="gray"> · </Text>
                 <Text color="magenta">
