@@ -37,9 +37,25 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
   private tasks = new Map<string, SubagentTask>();
   private running = 0;
   private queue: QueuedItem[] = [];
+  private sessionPool: string[] = [];
 
   constructor() {
     super();
+  }
+
+  /** Pre-create sessions to eliminate DB writes from the spawn critical path. */
+  prewarm(count: number): void {
+    for (let i = 0; i < count; i++) {
+      const session = createSession('subagent: (prewarmed)');
+      this.sessionPool.push(session.id);
+    }
+  }
+
+  private getOrCreateSession(label: string): string {
+    if (this.sessionPool.length > 0) {
+      return this.sessionPool.pop()!;
+    }
+    return createSession(label).id;
   }
 
   async spawn(parentSessionId: string, taskDescription: string | unknown, runId: string, model?: string): Promise<string> {
@@ -47,14 +63,14 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     const taskId = randomUUID();
     const desc = String(taskDescription ?? '');
     const preview = desc.slice(0, 60).replace(/\n/g, ' ');
-    const session = createSession(`subagent: ${preview}`);
+    const sessionId = this.getOrCreateSession(`subagent: ${preview}`);
     const resolvedModel = model ?? config.acpDefaultModel ?? config.defaultModel;
 
     const task: SubagentTask = {
       id: taskId,
       runId,
       parentSessionId,
-      sessionId: session.id,
+      sessionId,
       task: desc,
       model: resolvedModel,
       status: 'queued',
@@ -64,7 +80,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     this.tasks.set(taskId, task);
 
     // Persist to DB
-    createSubagentRun(taskId, runId, session.id, desc, resolvedModel);
+    createSubagentRun(taskId, runId, sessionId, desc, resolvedModel);
 
     this.emit('task:queued', taskId, preview);
 
@@ -79,13 +95,20 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     return taskId;
   }
 
-  async spawnMany(parentSessionId: string, tasks: string[], runId: string, model?: string): Promise<string[]> {
-    const ids: string[] = [];
-    for (const t of tasks) {
-      const id = await this.spawn(parentSessionId, t, runId, model);
-      ids.push(id);
-    }
-    return ids;
+  async spawnMany(
+    parentSessionId: string,
+    tasks: Array<string | { task: string; model?: string }>,
+    runId: string,
+    model?: string,
+  ): Promise<string[]> {
+    return Promise.all(
+      tasks.map(t => {
+        if (typeof t === 'string') {
+          return this.spawn(parentSessionId, t, runId, model);
+        }
+        return this.spawn(parentSessionId, t.task, runId, t.model ?? model);
+      })
+    );
   }
 
   getTask(taskId: string): SubagentTask | undefined {
