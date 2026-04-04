@@ -3,6 +3,7 @@ import { getConfig } from '../config/index.js';
 export interface ModelInfo {
   name: string;
   contextLength: number;
+  capabilities: string[];
 }
 
 const DEFAULT_CONTEXT_LENGTH = 4096;
@@ -16,7 +17,7 @@ export async function getModelInfo(model: string): Promise<ModelInfo> {
   const cached = cache.get(model);
   if (cached) return cached;
 
-  const info: ModelInfo = { name: model, contextLength: DEFAULT_CONTEXT_LENGTH };
+  const info: ModelInfo = { name: model, contextLength: DEFAULT_CONTEXT_LENGTH, capabilities: [] };
 
   try {
     const { ollamaHost } = getConfig();
@@ -29,6 +30,7 @@ export async function getModelInfo(model: string): Promise<ModelInfo> {
     if (res.ok) {
       const data = await res.json() as Record<string, unknown>;
       info.contextLength = extractContextLength(data) ?? DEFAULT_CONTEXT_LENGTH;
+      info.capabilities = Array.isArray(data.capabilities) ? data.capabilities as string[] : [];
     }
   } catch {
     // Network error — use fallback
@@ -44,6 +46,14 @@ export async function getModelInfo(model: string): Promise<ModelInfo> {
 export async function getContextLength(model: string): Promise<number> {
   const info = await getModelInfo(model);
   return info.contextLength;
+}
+
+/**
+ * Check if a model supports native tool calling via Ollama capabilities.
+ */
+export async function supportsTools(model: string): Promise<boolean> {
+  const info = await getModelInfo(model);
+  return info.capabilities.includes('tools');
 }
 
 /**

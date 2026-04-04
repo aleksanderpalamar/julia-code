@@ -9,6 +9,7 @@ import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
 import { performStructuredCompaction, serializeCompaction, deserializeCompaction, type StructuredCompaction } from '../context/compaction.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
+import { supportsTools } from '../context/model-info.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { getSubagentManager } from './subagent.js';
@@ -107,7 +108,10 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const loopModel = config.toolModel ?? requestedModel;
     const auxModel = requestedModel;
 
-    if (loopModel !== requestedModel) {
+    // Only announce model switch if local model doesn't support tools
+    // (when local supports tools, we'll use it directly — no switch needed)
+    const localToolCapable = await supportsTools(requestedModel);
+    if (loopModel !== requestedModel && !localToolCapable) {
       this.emit('model_switch', loopModel);
     }
 
@@ -141,6 +145,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       const hasToolModel = loopModel !== auxModel;
       let switchedToCloud = false;
 
+      // Check if the local model supports native tool calling
+      const localHasTools = hasToolModel ? await supportsTools(auxModel) : false;
+
       while (iterations < maxIterations) {
         if (this.abortController?.signal.aborted) {
           this.emit('error', 'Aborted');
@@ -150,10 +157,12 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         iterations++;
         this.emit('thinking');
 
-        // Local-first routing: 1st iteration uses local model without tools,
-        // subsequent iterations (or after fallback) use cloud model with tools
-        const useLocalFirst = iterations === 1 && hasToolModel && !switchedToCloud;
-        const currentModel = useLocalFirst ? auxModel : loopModel;
+        // Local-first routing:
+        // - If local model supports tools → use local with tools (unless it failed and we switched to cloud)
+        // - If local model does NOT support tools → 1st iteration without tools, then cloud
+        const useLocalFirst = iterations === 1 && hasToolModel && !localHasTools && !switchedToCloud;
+        const currentModel = switchedToCloud ? loopModel
+          : (useLocalFirst ? auxModel : (localHasTools ? auxModel : loopModel));
         const currentTools = useLocalFirst ? undefined : toolSchemas;
 
         // Build context fresh each iteration (now async with budget awareness)
@@ -220,9 +229,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           }
         }
 
-        // Local-first: check if local model response indicates tools are needed
-        if (useLocalFirst && toolCalls.length === 0 && needsToolCalling(fullText)) {
-          // Discard local response and retry with cloud + tools
+        // Fallback: local model had tools but responded with text instead of tool_calls
+        // (e.g. wrote shell commands as text). Switch to cloud model for reliable tool execution.
+        const localFailedTools = localHasTools && hasToolModel && !switchedToCloud
+          && toolCalls.length === 0 && needsToolCalling(fullText);
+        if ((useLocalFirst || localFailedTools) && toolCalls.length === 0 && needsToolCalling(fullText)) {
           this.emit('clear_streaming');
           switchedToCloud = true;
           this.emit('chunk', `🔄 Trocando para ${loopModel} para executar ferramentas...\n\n`);
@@ -783,16 +794,20 @@ function needsToolCalling(text: string): boolean {
 
   // Category 1: Explicit refusal
   const refusalIndicators = [
-    'não consigo acessar', 'não tenho acesso', 'não posso executar',
+    'não consigo acessar', 'não consigo executar', 'não consigo rodar',
+    'não tenho acesso', 'não posso executar', 'não posso rodar',
     'não posso ler', 'não consigo ler', 'não consigo listar',
     'não tenho capacidade', 'não consigo verificar', 'não tenho como',
     'não posso acessar', 'sem acesso ao', 'sem acesso a ',
+    'não consigo criar', 'não consigo escrever', 'não posso criar',
     'você pode executar', 'execute o comando', 'rode o comando',
     'tente rodar', 'você pode rodar', 'você pode usar o comando',
-    'i cannot access', 'i cannot execute', 'i cannot read',
+    'i cannot access', 'i cannot execute', 'i cannot read', 'i cannot run',
     'i don\'t have access', 'i can\'t access', 'i can\'t read',
-    'i can\'t execute', 'i can\'t list', 'you can run',
-    'try running', 'you could run',
+    'i can\'t execute', 'i can\'t run', 'i can\'t list',
+    'i can\'t create', 'i can\'t write',
+    'you can run', 'try running', 'you could run',
+    'unable to execute', 'unable to run', 'unable to access',
   ];
   if (refusalIndicators.some(i => lower.includes(i))) return true;
 
