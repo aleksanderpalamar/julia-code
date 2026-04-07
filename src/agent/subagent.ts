@@ -44,7 +44,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     super();
   }
 
-  /** Pre-create sessions to eliminate DB writes from the spawn critical path. */
   prewarm(count: number): void {
     for (let i = 0; i < count; i++) {
       const session = createSession('subagent: (prewarmed)');
@@ -80,7 +79,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
     this.tasks.set(taskId, task);
 
-    // Persist to DB
     createSubagentRun(taskId, runId, sessionId, desc, resolvedModel);
 
     this.emit('task:queued', taskId, preview);
@@ -89,7 +87,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     if (this.running < maxConcurrent) {
       this.runTask(task, resolvedModel);
     } else {
-      // Queue it — will be started when a slot opens
       this.queue.push({ task, model: resolvedModel });
     }
 
@@ -163,7 +160,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     task.startedAt = new Date();
     this.running++;
 
-    // Persist running status
     updateSubagentRunStatus(task.id, 'running', { startedAt: task.startedAt.toISOString() });
 
     this.emit('task:started', task.id, label);
@@ -183,7 +179,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     });
 
     agent.on('done', (fullText) => {
-      // Guard: ignore if already finalized (e.g. cancelled)
       if (task.status === 'completed' || task.status === 'failed') return;
       const result = fullText || resultText;
       task.status = 'completed';
@@ -202,7 +197,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     });
 
     agent.on('error', (error) => {
-      // Guard: ignore if already finalized (e.g. cancelled)
       if (task.status === 'completed' || task.status === 'failed') return;
       task.status = 'failed';
       task.error = error;
@@ -219,9 +213,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       this.drainQueue();
     });
 
-    // Fire and forget — events handle completion
     agent.run(task.sessionId, task.task, model).catch((err) => {
-      // Guard: ignore if already finalized (e.g. cancelled)
       if (task.status === 'completed' || task.status === 'failed') return;
       const errorMsg = err instanceof Error ? err.message : String(err);
       task.status = 'failed';
@@ -240,12 +232,10 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     });
   }
 
-  /** Cancel a running or queued sub-agent. Returns true if the task was found and cancelled. */
   cancelTask(taskId: string): boolean {
     const task = this.tasks.get(taskId);
     if (!task || task.status === 'completed' || task.status === 'failed') return false;
 
-    // If running, abort the agent loop
     const agent = this.agents.get(taskId);
     if (agent) {
       agent.abort();
@@ -253,7 +243,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       this.running--;
     }
 
-    // If queued, remove from queue
     const queueIdx = this.queue.findIndex(item => item.task.id === taskId);
     if (queueIdx >= 0) {
       this.queue.splice(queueIdx, 1);
@@ -273,7 +262,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     return true;
   }
 
-  /** Cancel all running and queued sub-agents for a given parent session. Returns number cancelled. */
   cancelAll(parentSessionId: string): number {
     let cancelled = 0;
     for (const [taskId, task] of this.tasks) {
@@ -293,7 +281,6 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
   }
 }
 
-// Singleton
 let _manager: SubagentManager | null = null;
 
 export function getSubagentManager(): SubagentManager {

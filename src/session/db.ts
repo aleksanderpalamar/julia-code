@@ -11,18 +11,15 @@ export function getDb(): Database.Database {
   const dbPath = getConfig().dbPath;
   const dbDir = dirname(dbPath);
 
-  // Security: restrictive permissions on database directory and file
   mkdirSync(dbDir, { recursive: true, mode: 0o700 });
 
   _db = new Database(dbPath);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
 
-  // Set restrictive file permissions (owner read/write only)
   try {
     chmodSync(dbPath, 0o600);
   } catch {
-    // May fail on some filesystems, non-critical
   }
 
   initSchema(_db);
@@ -105,19 +102,16 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_subagent_runs_run ON subagent_runs(run_id);
   `);
 
-  // Migration: add total_tokens column to sessions if it doesn't exist
   const columns = db.pragma('table_info(sessions)') as Array<{ name: string }>;
   if (!columns.some(c => c.name === 'total_tokens')) {
     db.exec('ALTER TABLE sessions ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0');
   }
 
-  // Migration: add images column to messages if it doesn't exist
   const msgCols = db.pragma('table_info(messages)') as Array<{ name: string }>;
   if (!msgCols.some(c => c.name === 'images')) {
     db.exec('ALTER TABLE messages ADD COLUMN images TEXT');
   }
 
-  // Migration: add format column to compactions for structured compaction support
   const compCols = db.pragma('table_info(compactions)') as Array<{ name: string }>;
   if (!compCols.some(c => c.name === 'format')) {
     db.exec("ALTER TABLE compactions ADD COLUMN format TEXT NOT NULL DEFAULT 'text'");

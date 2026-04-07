@@ -25,10 +25,6 @@ export interface BuildContextResult {
   health: ReturnType<typeof assessHealth>;
 }
 
-/**
- * Build the full context for an LLM call.
- * Now async: queries model info for context window size on first call.
- */
 export async function buildContext(
   sessionId: string,
   model: string,
@@ -37,16 +33,13 @@ export async function buildContext(
   const messages: ChatMessage[] = [];
   const config = getConfig();
 
-  // 1. Build system prompt
   const systemContent = buildSystemPrompt(options);
   if (systemContent) {
     messages.push({ role: 'system', content: systemContent });
   }
 
-  // 2. Compute budget based on actual model context window
   const budget = await computeBudget(model, systemContent);
 
-  // 3. Task anchor — always present, never compacted
   const compaction = getLatestCompaction(sessionId);
   let taskAnchorText: string | null = null;
 
@@ -57,7 +50,6 @@ export async function buildContext(
         taskAnchorText = structured.taskGoal;
       }
     } catch {
-      // fall through to raw extraction
     }
   }
 
@@ -69,10 +61,8 @@ export async function buildContext(
     messages.push({ role: 'system', content: formatTaskAnchor(taskAnchorText) });
   }
 
-  // 4. Memories — filtered by budget (not hardcoded 15)
   const maxMemoryTokens = budget.memories;
-  const allMemories = getRecentMemories(30); // fetch more, then trim
-  let memoriesSection = '';
+  const allMemories = getRecentMemories(30);   let memoriesSection = '';
   if (allMemories.length > 0 && maxMemoryTokens > 0) {
     const memoryLines: string[] = [];
     let memTokens = 0;
@@ -99,7 +89,6 @@ export async function buildContext(
     messages.push({ role: 'system', content: memoriesSection });
   }
 
-  // 5. Compaction — render structured compaction within budget
   if (compaction) {
     const structured = deserializeCompaction(compaction.summary, compaction.format);
     const compactionText = formatCompactionForContext(structured, budget.compactedHistory);
@@ -109,7 +98,6 @@ export async function buildContext(
       content: `[Conversation summary up to this point]\n${compactionText}`,
     });
 
-    // Load messages after compaction boundary
     const recentDbMessages = getMessages(sessionId, compaction.messages_end);
     const retained = selectMessagesForRetention(recentDbMessages, budget.recentMessages);
 
@@ -117,7 +105,6 @@ export async function buildContext(
       messages.push(dbMessageToChatMessage(msg));
     }
   } else {
-    // No compaction — load all messages, but check budget
     const allDbMessages = getMessages(sessionId);
     if (allDbMessages.length > 0) {
       const totalDbTokens = allDbMessages.reduce(
@@ -126,7 +113,6 @@ export async function buildContext(
       );
 
       if (totalDbTokens > budget.recentMessages) {
-        // Over budget without compaction — use priority retention
         const retained = selectMessagesForRetention(allDbMessages, budget.recentMessages);
         for (const msg of retained.toKeep) {
           messages.push(dbMessageToChatMessage(msg));
@@ -139,23 +125,16 @@ export async function buildContext(
     }
   }
 
-  // 6. Assess context health
   const health = assessHealth(messages, budget);
 
-  // Inject context warning if needed
   const warning = getContextWarningMessage(health);
   if (warning) {
-    // Insert warning right after the first system message
     messages.splice(1, 0, { role: 'system', content: warning });
   }
 
   return { messages, budget, health };
 }
 
-/**
- * Check if the context needs compaction.
- * Now uses the dynamic budget system instead of hardcoded thresholds.
- */
 export async function getCompactableMessages(
   sessionId: string,
   model: string,
@@ -171,19 +150,16 @@ export async function getCompactableMessages(
     return null;
   }
 
-  // Use dynamic budget for threshold
   const budget = await computeBudget(model);
   const totalTokens = allMessages.reduce(
     (sum, m) => sum + estimateDbMessageTokens(m.content, m.tool_calls),
     0,
   );
 
-  // Trigger compaction when messages exceed the recent messages budget
   if (totalTokens < budget.recentMessages) {
     return null;
   }
 
-  // Use priority-based selection to decide what to compact
   const { toCompact } = selectMessagesForRetention(
     allMessages,
     budget.recentMessages,
@@ -192,7 +168,6 @@ export async function getCompactableMessages(
 
   if (toCompact.length === 0) return null;
 
-  // Sort by ID to get the last compacted message
   const sorted = [...toCompact].sort((a, b) => a.id - b.id);
 
   return {
@@ -201,9 +176,6 @@ export async function getCompactableMessages(
   };
 }
 
-/**
- * Emergency compaction check — for critical/emergency health levels.
- */
 export async function getEmergencyCompactableMessages(
   sessionId: string,
   model: string,
@@ -227,8 +199,6 @@ export async function getEmergencyCompactableMessages(
     lastId: toCompact[toCompact.length - 1].id,
   };
 }
-
-// --- Internal helpers ---
 
 function buildSystemPrompt(options?: BuildContextOptions): string {
   const skills = loadSkills();
@@ -294,7 +264,6 @@ function dbMessageToChatMessage(msg: Message): ChatMessage {
     try {
       chatMsg.tool_calls = JSON.parse(msg.tool_calls);
     } catch {
-      // ignore malformed tool_calls
     }
   }
 
@@ -306,7 +275,6 @@ function dbMessageToChatMessage(msg: Message): ChatMessage {
     try {
       chatMsg.images = JSON.parse(msg.images);
     } catch {
-      // ignore malformed images
     }
   }
 

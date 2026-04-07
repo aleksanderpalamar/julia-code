@@ -39,7 +39,6 @@ export const fetchTool: ToolDefinition = {
     const body = args.body as string | undefined;
     const maxLength = (args.max_length as number) ?? 20000;
 
-    // Security: validate URL against SSRF blocklist
     try {
       validateUrl(url);
     } catch (err) {
@@ -69,19 +68,16 @@ export const fetchTool: ToolDefinition = {
       const contentType = res.headers.get('content-type') ?? '';
       let text = await res.text();
 
-      // Strip HTML tags for cleaner output if it's an HTML page
       if (contentType.includes('text/html')) {
         text = htmlToText(text);
       }
 
-      // Truncate if too long
       if (text.length > maxLength) {
         text = text.slice(0, maxLength) + '\n\n[... truncated]';
       }
 
       const statusInfo = `HTTP ${res.status} ${res.statusText}`;
 
-      // Wrap external content with isolation markers
       const wrappedContent = wrapExternalContent(url, `${statusInfo}\n\n${text.trim()}`);
 
       return {
@@ -100,31 +96,22 @@ export const fetchTool: ToolDefinition = {
   },
 };
 
-/**
- * Basic HTML to text conversion — strips tags, decodes common entities,
- * removes scripts/styles, and collapses whitespace.
- */
 function htmlToText(html: string): string {
   return html
-    // Remove script and style blocks
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<nav[\s\S]*?<\/nav>/gi, '')
     .replace(/<header[\s\S]*?<\/header>/gi, '')
     .replace(/<footer[\s\S]*?<\/footer>/gi, '')
-    // Block-level elements → newlines
     .replace(/<\/(p|div|h[1-6]|li|tr|br|hr)[^>]*>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
-    // Strip remaining tags
     .replace(/<[^>]+>/g, '')
-    // Decode common HTML entities
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
-    // Collapse whitespace
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

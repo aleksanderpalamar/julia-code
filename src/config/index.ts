@@ -58,8 +58,6 @@ export function loadConfig(): Config {
   loadEnv();
   const settings = loadSettings();
 
-  // Priority: env vars > settings.json > defaults
-
   _config = ConfigSchema.parse({
     ollamaHost: process.env.OLLAMA_HOST
       ?? settings?.models?.baseUrl,
@@ -78,7 +76,6 @@ export function loadConfig(): Config {
       : settings?.session?.compactionKeepRecent,
     workspace: process.env.WORKSPACE
       ?? settings?.workspace,
-    // ACP
     acpEnabled: settings?.acp?.enabled,
     acpAutoOrchestrate: settings?.acp?.autoOrchestrate,
     acpMaxConcurrent: settings?.acp?.maxConcurrent,
@@ -87,13 +84,11 @@ export function loadConfig(): Config {
     acpCancelOnFailure: settings?.acp?.cancelOnFailure,
     toolModel: settings?.models?.toolModel,
     defaultTemperament: settings?.temperament?.default,
-    // Context window management
     contextReservePercent: settings?.context?.reservePercent,
     contextEmergencyThreshold: settings?.context?.emergencyThreshold,
     contextMaxToolResultTokens: settings?.context?.maxToolResultTokens,
   });
 
-  // Resolve relative dbPath against ~/.juliacode/ instead of cwd
   if (_config.dbPath && !_config.dbPath.startsWith('/')) {
     _config.dbPath = join(JULIA_HOME, _config.dbPath);
   }

@@ -13,7 +13,6 @@ import { sessionsTool } from './sessions.js';
 import { memoryTool } from './memory.js';
 import { subagentTool } from './subagent.js';
 
-
 const tools = new Map<string, ToolDefinition>();
 
 export function registerTool(tool: ToolDefinition): void {

@@ -6,20 +6,12 @@ import { scanForInjection } from '../security/sanitize.js';
 const DEFAULTS_DIR = new URL('defaults/', import.meta.url).pathname;
 const USER_SKILLS_DIR = join(process.cwd(), 'data', 'skills');
 
-/** Maximum allowed skill file size (50KB). */
 const MAX_SKILL_SIZE = 50 * 1024;
 
-/**
- * Load only built-in (system) skills. These are fully trusted.
- */
 export function loadSkills(): Skill[] {
   return loadFromDir(DEFAULTS_DIR);
 }
 
-/**
- * Load user-defined skills separately, with validation.
- * These are loaded into a lower-trust section of the prompt.
- */
 export function loadUserSkills(): Skill[] {
   if (!existsSync(USER_SKILLS_DIR)) return [];
 
@@ -31,7 +23,6 @@ export function loadUserSkills(): Skill[] {
 
     const filePath = join(USER_SKILLS_DIR, file);
 
-    // Check file size
     const stat = statSync(filePath);
     if (stat.size > MAX_SKILL_SIZE) {
       process.stderr.write(`[security] Skill "${file}" excede ${MAX_SKILL_SIZE} bytes — ignorado\n`);
@@ -40,7 +31,6 @@ export function loadUserSkills(): Skill[] {
 
     const content = readFileSync(filePath, 'utf-8');
 
-    // Scan for injection patterns
     const scan = scanForInjection(content);
     if (scan.isSuspicious) {
       process.stderr.write(

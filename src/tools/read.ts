@@ -35,7 +35,6 @@ export const readTool: ToolDefinition = {
       const offset = (args.offset as number) || 1;
       const limit = args.limit as number | undefined;
 
-      // Auto-limit large files when no explicit range is given
       const AUTO_LIMIT = 200;
       const effectiveLimit = limit ?? (totalLines > AUTO_LIMIT && offset === 1 ? AUTO_LIMIT : undefined);
 
@@ -48,11 +47,9 @@ export const readTool: ToolDefinition = {
         wasAutoTruncated = !limit && effectiveLimit === AUTO_LIMIT && totalLines > AUTO_LIMIT;
       }
 
-      // Add line numbers
       const startLine = offset;
       const numbered = lines.map((line, i) => `${startLine + i}\t${line}`).join('\n');
 
-      // Add metadata header
       const header = wasAutoTruncated
         ? `[file: ${filePath} | lines: ${startLine}-${startLine + lines.length - 1} of ${totalLines} — use offset/limit to read more]\n`
         : totalLines > AUTO_LIMIT

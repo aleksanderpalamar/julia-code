@@ -24,7 +24,6 @@ async function detectTool(): Promise<ClipboardTool | null> {
     return cachedTool;
   }
 
-  // Wayland
   if (process.env['WAYLAND_DISPLAY'] || process.env['XDG_SESSION_TYPE'] === 'wayland') {
     if (await which('wl-paste')) {
       cachedTool = 'wl-paste';
@@ -32,13 +31,11 @@ async function detectTool(): Promise<ClipboardTool | null> {
     }
   }
 
-  // X11 fallback
   if (await which('xclip')) {
     cachedTool = 'xclip';
     return cachedTool;
   }
 
-  // Try wl-paste anyway (might work even without WAYLAND_DISPLAY)
   if (await which('wl-paste')) {
     cachedTool = 'wl-paste';
     return cachedTool;
@@ -95,8 +92,7 @@ async function extractImage(tool: ClipboardTool): Promise<Buffer> {
   }
 }
 
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-
+const MAX_SIZE = 10 * 1024 * 1024; 
 export async function getClipboardImage(): Promise<{ base64: string } | null> {
   const tool = await detectTool();
   if (!tool) {

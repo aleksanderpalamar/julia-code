@@ -33,7 +33,6 @@ export class McpClient {
   async connect(): Promise<void> {
     this.transport.start();
 
-    // Initialize handshake
     const initResult = (await this.transport.send("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
@@ -43,10 +42,8 @@ export class McpClient {
       serverInfo?: { name?: string; version?: string };
     };
 
-    // Send initialized notification
     this.transport.notify("notifications/initialized");
 
-    // Discover tools
     const toolsResult = (await this.transport.send("tools/list", {})) as {
       tools?: Array<{
         name: string;
@@ -85,7 +82,6 @@ export class McpClient {
         isError?: boolean;
       };
 
-      // Extract text content from MCP response
       const textParts: string[] = [];
       for (const item of result?.content ?? []) {
         if (item.type === "text" && item.text) {

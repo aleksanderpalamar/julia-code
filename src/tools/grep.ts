@@ -34,7 +34,6 @@ export const grepTool: ToolDefinition = {
     const ignoreCase = args.ignore_case as boolean;
     const glob = args.glob as string | undefined;
 
-    // Build args array — no shell interpolation, no injection possible
     const grepArgs: string[] = ['-rn'];
     if (ignoreCase) grepArgs.push('-i');
     if (glob) grepArgs.push(`--include=${glob}`);
@@ -47,7 +46,6 @@ export const grepTool: ToolDefinition = {
         maxBuffer: 1024 * 1024,
       }).trim();
 
-      // Limit output lines
       const lines = output.split('\n');
       const limited = lines.slice(0, 100);
       const result = limited.join('\n')
@@ -55,7 +53,6 @@ export const grepTool: ToolDefinition = {
 
       return { success: true, output: result || 'No matches found.' };
     } catch (err: unknown) {
-      // grep exits with code 1 when no matches found — not an error
       const e = err as { status?: number; stdout?: string };
       if (e.status === 1) {
         return { success: true, output: 'No matches found.' };

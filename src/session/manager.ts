@@ -102,10 +102,6 @@ export function getMessageCount(sessionId: string): number {
   return row.count;
 }
 
-/**
- * Remove the last assistant message from a session.
- * Used when local-first routing needs to discard a response and retry with cloud.
- */
 export function removeLastAssistantMessage(sessionId: string): void {
   const db = getDb();
   const last = db.prepare(
@@ -116,8 +112,6 @@ export function removeLastAssistantMessage(sessionId: string): void {
   }
 }
 
-// --- Compaction ---
-
 export interface Compaction {
   id: number;
   session_id: string;
@@ -127,8 +121,6 @@ export interface Compaction {
   format: 'text' | 'structured';
   created_at: string;
 }
-
-// --- Memory ---
 
 export interface Memory {
   id: number;
@@ -195,8 +187,6 @@ export function getRecentMemories(limit = 15): Memory[] {
   ).all(limit) as Memory[];
 }
 
-// --- Orchestration Runs ---
-
 export interface OrchestrationRun {
   id: string;
   parent_session_id: string;
@@ -231,8 +221,6 @@ export function listOrchestrationRuns(parentSessionId: string): OrchestrationRun
     'SELECT * FROM orchestration_runs WHERE parent_session_id = ? ORDER BY created_at DESC'
   ).all(parentSessionId) as OrchestrationRun[];
 }
-
-// --- Subagent Runs ---
 
 export interface SubagentRun {
   id: string;
@@ -285,8 +273,6 @@ export function listSubagentRuns(runId: string): SubagentRun[] {
     'SELECT * FROM subagent_runs WHERE run_id = ? ORDER BY created_at'
   ).all(runId) as SubagentRun[];
 }
-
-// --- Compaction ---
 
 export function getLatestCompaction(sessionId: string): Compaction | undefined {
   return getDb().prepare(

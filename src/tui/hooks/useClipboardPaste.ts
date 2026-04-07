@@ -16,8 +16,6 @@ export function useClipboardPaste(options: ClipboardPasteOptions): {
   optionsRef.current = options;
 
   useEffect(() => {
-    // Ink sets stdin.setEncoding('utf8'), so data arrives as string, not Buffer.
-    // Ctrl+V in raw mode = character U+0016 (0x16).
     const handler = (data: string | Buffer) => {
       if (optionsRef.current.disabled) return;
 
@@ -28,8 +26,6 @@ export function useClipboardPaste(options: ClipboardPasteOptions): {
 
       if (!isCtrlV) return;
 
-      // Set flag synchronously BEFORE Ink processes the same event,
-      // so Input's handleChange can suppress the spurious 'v'.
       pasteInProgress.current = true;
 
       getClipboardImage()
@@ -41,7 +37,6 @@ export function useClipboardPaste(options: ClipboardPasteOptions): {
               `clipboard-${counterRef.current}.png`,
             );
           } else {
-            // No image in clipboard — reset flag so next keystroke isn't swallowed
             pasteInProgress.current = false;
           }
         })

@@ -83,7 +83,6 @@ export function Input({
       setValue(cleaned);
       setSelectedIndex(0);
 
-      // Auto-submit picker commands as soon as the name is fully typed
       if (cleaned.startsWith("/") && !cleaned.includes(" ")) {
         const matches = filterCommands(cleaned);
         if (matches.length === 1 && matches[0].name === cleaned && matches[0].autoTrigger) {

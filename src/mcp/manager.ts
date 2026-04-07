@@ -36,7 +36,6 @@ export async function initMcpServers(): Promise<void> {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[mcp] Failed to connect to '${serverName}': ${msg}\n`);
-      // Remove failed client
       const idx = clients.indexOf(client);
       if (idx !== -1) clients.splice(idx, 1);
     }
@@ -50,7 +49,6 @@ export async function shutdownMcpServers(): Promise<void> {
     try {
       client.close();
     } catch {
-      // Ignore close errors
     }
   }
   clients.length = 0;
@@ -102,7 +100,6 @@ export function removeMcpServer(name: string): void {
     try {
       clients[idx].close();
     } catch {
-      // Ignore close errors
     }
     clients.splice(idx, 1);
   }

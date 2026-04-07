@@ -33,7 +33,6 @@ export const globTool: ToolDefinition = {
         return { success: true, output: 'No files found matching pattern.' };
       }
 
-      // Sort and limit to 200 results
       matches.sort();
       const limited = matches.slice(0, 200);
       const output = limited.join('\n')
@@ -50,10 +49,6 @@ export const globTool: ToolDefinition = {
   },
 };
 
-/**
- * Recursively find files matching a glob pattern using native Node.js APIs.
- * No shell execution — safe from injection.
- */
 async function findMatches(root: string, pattern: string, maxDepth = 20): Promise<string[]> {
   const results: string[] = [];
   const MAX_RESULTS = 500;
@@ -65,8 +60,7 @@ async function findMatches(root: string, pattern: string, maxDepth = 20): Promis
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
-      return; // Skip unreadable directories
-    }
+      return;     }
 
     for (const entry of entries) {
       if (results.length >= MAX_RESULTS) break;
@@ -74,7 +68,6 @@ async function findMatches(root: string, pattern: string, maxDepth = 20): Promis
       const fullPath = resolve(dir, entry.name);
       const relPath = relative(root, fullPath);
 
-      // Skip hidden directories like .git
       if (entry.isDirectory() && entry.name.startsWith('.')) continue;
 
       if (entry.isDirectory()) {

@@ -9,9 +9,6 @@ interface QueueItem {
   reject: (err: Error) => void;
 }
 
-/**
- * Serializes agent runs per session so only one runs at a time.
- */
 export class AgentQueue {
   private queues = new Map<string, QueueItem[]>();
   private running = new Set<string>();

@@ -34,7 +34,6 @@ export class OllamaProvider implements LLMProvider {
 
       if (res.ok || res.status < 500) break;
 
-      // Retry on 5xx errors
       if (attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
       }
@@ -69,7 +68,6 @@ export class OllamaProvider implements LLMProvider {
           continue;
         }
 
-        // Native tool calls from Ollama
         if (chunk.message?.tool_calls?.length) {
           for (const tc of chunk.message.tool_calls) {
             const toolCall: ToolCall = {
@@ -84,14 +82,12 @@ export class OllamaProvider implements LLMProvider {
           }
         }
 
-        // Text content
         if (chunk.message?.content) {
           fullText += chunk.message.content;
           yield { type: 'text', text: chunk.message.content };
         }
 
         if (chunk.done) {
-          // Check for fallback tool calls in text (for models without native tool support)
           if (accumulatedToolCalls.length === 0 && params.tools?.length) {
             const fallbackCalls = parseFallbackToolCalls(fullText);
             for (const tc of fallbackCalls) {
@@ -138,25 +134,16 @@ function formatMessage(msg: ChatMessage): Record<string, unknown> {
   return formatted;
 }
 
-/**
- * Parse fallback tool calls from text for models without native tool support.
- * Tries multiple formats since different models output tool calls differently.
- */
 function parseFallbackToolCalls(text: string): ToolCall[] {
-  // Format 1: <tool_call>{"name":"...", "arguments":{...}}</tool_call>
   let calls = parseToolCallJson(text);
   if (calls.length > 0) return calls;
 
-  // Format 2: <function_calls><invoke name="..."><parameter name="...">value</parameter></invoke></function_calls>
   calls = parseFunctionCallsXml(text);
   if (calls.length > 0) return calls;
 
   return [];
 }
 
-/**
- * Parse <tool_call>JSON</tool_call> format.
- */
 function parseToolCallJson(text: string): ToolCall[] {
   const calls: ToolCall[] = [];
   const regex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
@@ -175,17 +162,12 @@ function parseToolCallJson(text: string): ToolCall[] {
         });
       }
     } catch {
-      // Skip malformed tool calls
     }
   }
 
   return calls;
 }
 
-/**
- * Parse Anthropic-style <function_calls><invoke>...</invoke></function_calls> format.
- * Used by DeepSeek, Qwen, GPT-OSS and other models that emit this XML pattern.
- */
 function parseFunctionCallsXml(text: string): ToolCall[] {
   const calls: ToolCall[] = [];
   const invokeRegex = /<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/g;
@@ -212,9 +194,6 @@ function parseFunctionCallsXml(text: string): ToolCall[] {
   return calls;
 }
 
-/**
- * List models available in Ollama via /api/tags
- */
 export async function listOllamaModels(): Promise<string[]> {
   const { ollamaHost } = getConfig();
   try {
@@ -227,10 +206,6 @@ export async function listOllamaModels(): Promise<string[]> {
   }
 }
 
-/**
- * List models with full details (including remote_model, details, etc.)
- * Used for classifying models as local vs cloud.
- */
 export async function listOllamaModelsDetailed(): Promise<import('./model-classifier.js').OllamaModelEntry[]> {
   const { ollamaHost } = getConfig();
   try {
