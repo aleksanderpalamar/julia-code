@@ -27,7 +27,6 @@ export function useAgent(onSessionChanged?: () => void) {
   const onSessionChangedRef = useRef(onSessionChanged);
   onSessionChangedRef.current = onSessionChanged;
 
-  // Initialize agent once
   if (!queueRef.current) {
     const agent = new AgentLoop();
     queueRef.current = new AgentQueue(agent);
@@ -51,7 +50,6 @@ export function useAgent(onSessionChanged?: () => void) {
     };
 
     const onToolCall = (tc: { function: { name: string; arguments: Record<string, unknown> } }) => {
-      // Flush streaming text as assistant entry
       setStreamingText(prev => {
         if (prev.trim()) {
           setEntries(e => [...e, { type: 'assistant', content: prev }]);
@@ -81,8 +79,6 @@ export function useAgent(onSessionChanged?: () => void) {
         }
         return '';
       });
-      // If fullText wasn't already streamed (e.g., after tool calls)
-      // The streaming chunks already added it, so only add if nothing was streamed
     };
 
     const onUsage = (usage: TokenUsage) => {
@@ -126,7 +122,6 @@ export function useAgent(onSessionChanged?: () => void) {
 
     const onSubagentChunk = (taskId: string, label: string, text: string) => {
       setEntries(e => {
-        // Find existing subagent_stream entry for this taskId, or create one
         const existingIdx = e.findIndex(
           entry => entry.type === 'subagent_stream' && entry.toolName === taskId
         );

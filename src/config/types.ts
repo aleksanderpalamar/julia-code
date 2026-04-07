@@ -8,17 +8,14 @@ export const ConfigSchema = z.object({
   compactionThreshold: z.number().default(6000),   // estimated tokens before triggering compaction
   compactionKeepRecent: z.number().default(6),      // number of recent messages to keep uncompacted
   workspace: z.string().default(''),                // workspace root (empty = cwd)
-  // ACP — subagent coordination
   acpEnabled: z.boolean().default(true),
   acpAutoOrchestrate: z.boolean().default(true),  // auto-detect complex tasks and spawn subagents
   acpMaxConcurrent: z.number().default(3),
   acpSubagentMaxIterations: z.number().default(20),
   acpDefaultModel: z.string().nullable().default(null),
   acpCancelOnFailure: z.boolean().default(false),
-  // Auto-switch: modelo dedicado para tool calling (cloud/capaz)
   toolModel: z.string().nullable().default(null),
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
-  // Context window management
   contextReservePercent: z.number().default(0.15),
   contextEmergencyThreshold: z.number().default(0.90),
   contextMaxToolResultTokens: z.number().default(3000),
@@ -26,7 +23,6 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-// Schema for ~/.juliacode/settings.json
 export const SettingsModelSchema = z.object({
   id: z.string(),
   name: z.string().optional(),

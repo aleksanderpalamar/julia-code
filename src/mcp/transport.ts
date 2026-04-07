@@ -30,9 +30,6 @@ interface JsonRpcResponse {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
-/**
- * Allowlist of commands that MCP servers can be started with.
- */
 const MCP_COMMAND_ALLOWLIST = new Set([
   'npx', 'node', 'python', 'python3', 'uvx', 'uv', 'deno', 'bun',
 ]);
@@ -53,7 +50,6 @@ export class McpTransport extends EventEmitter {
   }
 
   start(): void {
-    // Security: validate command against allowlist
     const baseCommand = this.command.split('/').pop() ?? this.command;
     if (!MCP_COMMAND_ALLOWLIST.has(baseCommand)) {
       throw new Error(
@@ -61,7 +57,6 @@ export class McpTransport extends EventEmitter {
       );
     }
 
-    // Security: use curated env instead of full process.env
     const safeEnv = buildSafeEnv(this.env);
 
     this.child = spawn(this.command, this.args, {
@@ -75,7 +70,6 @@ export class McpTransport extends EventEmitter {
     });
 
     this.child.stderr!.on('data', (chunk: Buffer) => {
-      // Log MCP server stderr as debug info
       const lines = chunk.toString().trim();
       if (lines) {
         for (const line of lines.split('\n')) {
@@ -152,7 +146,6 @@ export class McpTransport extends EventEmitter {
 
   private processBuffer(): void {
     const lines = this.buffer.split('\n');
-    // Keep the last incomplete line in the buffer
     this.buffer = lines.pop() ?? '';
 
     for (const line of lines) {
@@ -172,9 +165,7 @@ export class McpTransport extends EventEmitter {
             pending.resolve(msg.result);
           }
         }
-        // Notifications from server are ignored for now
       } catch {
-        // Ignore unparseable lines (debug output, etc.)
       }
     }
   }

@@ -51,7 +51,9 @@ export function App({ sessionId }: Props) {
   const { entries, streamingText, isThinking, sessionTokens, activeToolModel, orchestrationProgress, sendMessage, addSystemEntry, sendBtw, pendingApproval, resolveApproval } =
     useAgent(refreshSession);
   const [model, setModel] = useState(() => getConfig().defaultModel);
-  const configToolModel = getConfig().toolModel;
+  const rawConfigToolModel = getConfig().toolModel;
+  const currentModelIsCloud = getAvailableModels().find(m => m.id === model)?.isCloud ?? false;
+  const configToolModel = currentModelIsCloud ? null : rawConfigToolModel;
   const [mode, setMode] = useState<AgentMode>('normal');
   const [temperament, setTemperament] = useState<Temperament>(() => getConfig().defaultTemperament as Temperament);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -90,7 +92,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // /trust commands
       if (text === "/trust" || text === "/trust list") {
         const dirs = getTrustedDirectories();
         if (dirs.length === 0) {
@@ -123,7 +124,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // Catch-all for unrecognized /trust subcommands
       if (text.startsWith("/trust")) {
         addSystemEntry(
           "Usage:\n  /trust             — list trusted dirs\n  /trust revoke <path> — revoke trust\n  /trust revoke-all    — revoke all"
@@ -131,7 +131,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // /mcp commands
       if (text === "/mcp" || text === "/mcp list") {
         const configs = getMcpServerConfigs();
         const statuses = getMcpServerStatuses();
@@ -183,7 +182,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // Catch-all for unrecognized /mcp subcommands
       if (text.startsWith("/mcp")) {
         addSystemEntry(
           "Usage:\n  /mcp             — list servers\n  /mcp add <name> <command> [args...]  — add server\n  /mcp remove <name>  — remove server"
@@ -191,7 +189,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // /model commands
       if (text === "/model") {
         setShowModelPicker(true);
         return;
@@ -216,7 +213,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // /toolmodel commands
       if (text === "/toolmodel") {
         setShowToolModelPicker(true);
         return;
@@ -246,7 +242,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // /temperament commands
       if (text === "/temperament") {
         setTemperament(prev => {
           const n = nextTemperament(prev);
@@ -277,7 +272,6 @@ export function App({ sessionId }: Props) {
         return;
       }
 
-      // /image commands
       if (text === "/image list") {
         if (pendingImageNames.length === 0) {
           addSystemEntry("No images attached.");
@@ -310,8 +304,7 @@ export function App({ sessionId }: Props) {
             return;
           }
           const stat = statSync(resolved);
-          const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-          if (stat.size > MAX_SIZE) {
+          const MAX_SIZE = 10 * 1024 * 1024;           if (stat.size > MAX_SIZE) {
             addSystemEntry(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max: 10MB`);
             return;
           }

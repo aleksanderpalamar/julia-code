@@ -23,7 +23,6 @@ export function startGateway(options: GatewayOptions = {}) {
   const port = options.port ?? 18800;
 
   const server = createServer(async (req, res) => {
-    // CORS for local dev
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -62,24 +61,20 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   const path = url.pathname;
   const method = req.method ?? 'GET';
 
-  // GET /health
   if (method === 'GET' && path === '/health') {
     return json(res, 200, { status: 'ok', model: getConfig().defaultModel });
   }
 
-  // GET /sessions
   if (method === 'GET' && path === '/sessions') {
     return json(res, 200, { sessions: listSessions() });
   }
 
-  // POST /sessions
   if (method === 'POST' && path === '/sessions') {
     const body = await readBody(req);
     const session = createSession(body.title as string | undefined);
     return json(res, 201, { session });
   }
 
-  // GET /sessions/:id
   const sessionMatch = path.match(/^\/sessions\/([^/]+)$/);
   if (method === 'GET' && sessionMatch) {
     const session = getSession(sessionMatch[1]);
@@ -87,7 +82,6 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, { session });
   }
 
-  // GET /sessions/:id/messages
   const messagesMatch = path.match(/^\/sessions\/([^/]+)\/messages$/);
   if (method === 'GET' && messagesMatch) {
     const session = getSession(messagesMatch[1]);
@@ -96,7 +90,6 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, { messages });
   }
 
-  // POST /chat — main endpoint
   if (method === 'POST' && path === '/chat') {
     const body = await readBody(req);
     if (!body.message) return json(res, 400, { error: 'message is required' });
@@ -105,7 +98,6 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const model = (body.model as string) ?? getConfig().defaultModel;
     const message = body.message as string;
 
-    // Collect events during the run
     const events: Array<{ type: string; data: unknown }> = [];
 
     const onChunk = (text: string) => events.push({ type: 'chunk', data: text });
@@ -126,7 +118,6 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       agent.off('tool_result', onToolResult);
     }
 
-    // Get the final assistant message
     const messages = getMessages(sessionId);
     const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
 
@@ -137,7 +128,6 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     });
   }
 
-  // POST /chat/stream — SSE streaming endpoint
   if (method === 'POST' && path === '/chat/stream') {
     const body = await readBody(req);
     if (!body.message) return json(res, 400, { error: 'message is required' });
@@ -186,7 +176,6 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // 404
   json(res, 404, { error: 'Not found' });
 }
 

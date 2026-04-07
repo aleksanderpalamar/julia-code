@@ -38,10 +38,6 @@ const MERGE_COMPACTION_PROMPT = `You are a context compressor. Merge the followi
 
 Existing summary:`;
 
-/**
- * Perform structured compaction of messages.
- * Falls back to rawSummary-only if JSON parsing fails.
- */
 export async function performStructuredCompaction(
   messages: Message[],
   existingCompaction: StructuredCompaction | null,
@@ -68,7 +64,6 @@ export async function performStructuredCompaction(
     });
   }
 
-  // Format messages for compaction
   let conversationText = '';
   for (const msg of messages) {
     const prefix = msg.role.toUpperCase();
@@ -78,10 +73,8 @@ export async function performStructuredCompaction(
     }
   }
 
-  // Truncate if conversation text is too large for the compaction call itself
   if (maxOutputTokens) {
-    const maxInputChars = maxOutputTokens * 7; // generous input allowance
-    if (conversationText.length > maxInputChars) {
+    const maxInputChars = maxOutputTokens * 7;     if (conversationText.length > maxInputChars) {
       conversationText = conversationText.slice(0, maxInputChars) + '\n... [truncated for compaction]';
     }
   }
@@ -100,17 +93,12 @@ export async function performStructuredCompaction(
   return parseCompactionResponse(response, existingCompaction);
 }
 
-/**
- * Parse LLM response into StructuredCompaction.
- * Falls back gracefully if JSON parsing fails.
- */
 function parseCompactionResponse(
   response: string,
   existing: StructuredCompaction | null,
 ): StructuredCompaction {
   const trimmed = response.trim();
 
-  // Try to extract JSON from the response (handle markdown code blocks)
   const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, trimmed];
   const jsonStr = (jsonMatch[1] ?? trimmed).trim();
 
@@ -127,7 +115,6 @@ function parseCompactionResponse(
       rawSummary: parsed.rawSummary ?? '',
     };
   } catch {
-    // JSON parsing failed — use raw text as fallback
     return {
       taskGoal: existing?.taskGoal ?? '',
       filesRead: existing?.filesRead ?? [],
@@ -141,14 +128,9 @@ function parseCompactionResponse(
   }
 }
 
-/**
- * Format a structured compaction for injection into the context.
- * Prioritizes sections by importance and truncates from the bottom if over budget.
- */
 export function formatCompactionForContext(compaction: StructuredCompaction, budgetTokens: number): string {
   const sections: string[] = [];
 
-  // Priority order: taskGoal first, always included
   if (compaction.taskGoal) {
     sections.push(`**Objetivo:** ${compaction.taskGoal}`);
   }
@@ -181,7 +163,6 @@ export function formatCompactionForContext(compaction: StructuredCompaction, bud
     sections.push(`**Resumo:** ${compaction.rawSummary}`);
   }
 
-  // Build output, truncating from bottom if over budget
   let result = '';
   for (const section of sections) {
     const candidate = result ? result + '\n\n' + section : section;
@@ -189,30 +170,20 @@ export function formatCompactionForContext(compaction: StructuredCompaction, bud
     result = candidate;
   }
 
-  return result || compaction.rawSummary.slice(0, budgetTokens * 3); // emergency fallback
-}
+  return result || compaction.rawSummary.slice(0, budgetTokens * 3); }
 
-/**
- * Serialize a StructuredCompaction to a JSON string for DB storage.
- */
 export function serializeCompaction(compaction: StructuredCompaction): string {
   return JSON.stringify(compaction);
 }
 
-/**
- * Deserialize a compaction from DB storage.
- * Handles both structured (JSON) and legacy (plain text) formats.
- */
 export function deserializeCompaction(summary: string, format?: string): StructuredCompaction {
   if (format === 'structured') {
     try {
       return JSON.parse(summary) as StructuredCompaction;
     } catch {
-      // Fall through to plain text handling
     }
   }
 
-  // Legacy plain text format
   return {
     taskGoal: '',
     filesRead: [],
