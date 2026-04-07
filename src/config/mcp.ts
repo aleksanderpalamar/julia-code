@@ -69,7 +69,7 @@ export function clearToolModel(): void {
   writeSettings(settings);
 }
 
-export function getAvailableModels(): Array<{ id: string; name?: string }> {
+export function getAvailableModels(): Array<{ id: string; name?: string; isCloud?: boolean }> {
   const settings = readSettings();
   return settings.models?.available ?? [];
 }
@@ -103,17 +103,14 @@ export async function syncAvailableModels(): Promise<void> {
   const currentDefault = settings.models!.default;
   const currentDefaultIsCloud = classified.find(m => m.id === currentDefault)?.isCloud ?? false;
 
-  // Auto-configure toolModel if not manually set
   if (!settings.models!.toolModel && hasLocal && hasCloud) {
     if (currentDefaultIsCloud) {
-      // Default is cloud — set it as toolModel and switch default to best local
       settings.models!.toolModel = currentDefault;
       const fast = selectFastModel(classified);
       if (fast) {
         settings.models!.default = fast;
       }
     } else {
-      // Default is local — pick the best cloud as toolModel
       const autoTool = selectToolModel(classified, currentDefault);
       if (autoTool) {
         settings.models!.toolModel = autoTool;
@@ -121,7 +118,6 @@ export async function syncAvailableModels(): Promise<void> {
     }
   }
 
-  // If no default model set, pick the best local model (or first available)
   if (!settings.models!.default && classified.length > 0) {
     const fast = selectFastModel(classified);
     if (fast) {

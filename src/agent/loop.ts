@@ -66,7 +66,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     this.options = options ?? {};
   }
 
-  /** Abort the current agent run. Stops iteration and emits error. */
   abort(): void {
     if (this.abortController) {
       this.abortController.abort();
@@ -104,12 +103,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const requestedModel = model ?? config.defaultModel;
     const provider = getProvider('ollama');
 
-    // Auto-switch: use toolModel for the main loop (with tools), requestedModel for auxiliary ops
-    const loopModel = config.toolModel ?? requestedModel;
+    const { getAvailableModels } = await import('../config/mcp.js');
+    const requestedIsCloud = getAvailableModels().find(m => m.id === requestedModel)?.isCloud ?? false;
+    const loopModel = (requestedIsCloud ? null : config.toolModel) ?? requestedModel;
     const auxModel = requestedModel;
 
-    // Only announce model switch if local model doesn't support tools
-    // (when local supports tools, we'll use it directly — no switch needed)
     const localToolCapable = await supportsTools(requestedModel);
     if (loopModel !== requestedModel && !localToolCapable) {
       this.emit('model_switch', loopModel);
@@ -122,13 +120,10 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
 
     try {
-      // Save user message
       addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
 
-      // Show thinking spinner immediately (before orchestration/compaction which can be slow)
       this.emit('thinking');
 
-      // Auto-orchestrate: analyze complexity and spawn subagents if needed
       if (config.acpEnabled && config.acpAutoOrchestrate && !this.options.excludeTools?.includes('subagent')) {
         const orchestrated = await this.maybeOrchestrate(sessionId, userMessage, auxModel);
         if (orchestrated) {
@@ -137,7 +132,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         }
       }
 
-      // Check if compaction is needed before this run (uses fast local model)
       await this.maybeCompact(sessionId, auxModel);
 
       let iterations = 0;
@@ -145,7 +139,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       const hasToolModel = loopModel !== auxModel;
       let switchedToCloud = false;
 
-      // Check if the local model supports native tool calling
       const localHasTools = hasToolModel ? await supportsTools(auxModel) : false;
 
       while (iterations < maxIterations) {
@@ -157,15 +150,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         iterations++;
         this.emit('thinking');
 
-        // Local-first routing:
-        // - If local model supports tools → use local with tools (unless it failed and we switched to cloud)
-        // - If local model does NOT support tools → 1st iteration without tools, then cloud
         const useLocalFirst = iterations === 1 && hasToolModel && !localHasTools && !switchedToCloud;
         const currentModel = switchedToCloud ? loopModel
           : (useLocalFirst ? auxModel : (localHasTools ? auxModel : loopModel));
         const currentTools = useLocalFirst ? undefined : toolSchemas;
 
-        // Build context fresh each iteration (now async with budget awareness)
         const { messages, budget, health } = await buildContext(sessionId, currentModel, {
           planMode: this.planMode,
           temperament: this.temperament,
@@ -174,15 +163,12 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         });
         currentBudget = budget;
 
-        // Emit context health for TUI
         this.emit('context_health', health);
 
-        // Emergency compaction if context is critically full
         if (shouldEmergencyCompact(health)) {
           this.emit('compacting');
           const keepCount = getEmergencyKeepCount(health);
           await this.performEmergencyCompaction(sessionId, auxModel, keepCount);
-          // Rebuild context after emergency compaction
           const rebuilt = await buildContext(sessionId, currentModel, {
             planMode: this.planMode,
             temperament: this.temperament,
@@ -190,12 +176,10 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             maxIterations,
             });
           this.emit('context_health', rebuilt.health);
-          // Use rebuilt messages
           messages.length = 0;
           messages.push(...rebuilt.messages);
         }
 
-        // Call LLM
         let fullText = '';
         const toolCalls: ToolCall[] = [];
 
@@ -229,8 +213,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           }
         }
 
-        // Fallback: local model had tools but responded with text instead of tool_calls
-        // (e.g. wrote shell commands as text). Switch to cloud model for reliable tool execution.
         const localFailedTools = localHasTools && hasToolModel && !switchedToCloud
           && toolCalls.length === 0 && needsToolCalling(fullText);
         if ((useLocalFirst || localFailedTools) && toolCalls.length === 0 && needsToolCalling(fullText)) {
@@ -241,19 +223,15 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           continue;
         }
 
-        // Save assistant message
         addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined);
 
-        // If no tool calls, we're done
         if (toolCalls.length === 0) {
           this.emit('done', fullText);
-          // Generate title in background (uses fast local model)
           this.maybeGenerateTitle(sessionId, auxModel, userMessage, fullText);
           this.running = false;
           return;
         }
 
-        // Execute tool calls and save results
         for (const tc of toolCalls) {
           if (this.abortController?.signal.aborted) {
             this.emit('error', 'Aborted');
@@ -263,7 +241,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           const toolName = tc.function.name;
           const toolArgs = tc.function.arguments;
 
-          // Security: check for blocked commands
           if (toolName === 'exec' && isBlockedCommand(toolArgs.command as string)) {
             const resultText = 'Operação bloqueada: este comando está na blocklist de segurança.';
             addMessage(sessionId, 'tool', resultText, undefined, tc.id);
@@ -271,10 +248,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             continue;
           }
 
-          // Security: approval gate for dangerous tools
           const risk = getToolRisk(toolName);
           if (risk === 'dangerous' && !this.approvedAllForSession) {
-            // Check allow rules first
             if (!matchesAllowRule(toolName, toolArgs, this.allowRules)) {
               const approved = await this.requestApproval(toolName, toolArgs);
               if (approved === 'deny') {
@@ -294,11 +269,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             ? result.output
             : `Error: ${result.error}\n${result.output}`;
 
-          // Truncate large tool results with dynamic caps based on context budget
-          let maxResultChars = 12000; // default fallback
-          if (currentBudget) {
+          let maxResultChars = 12000;           if (currentBudget) {
             maxResultChars = computeToolResultCap(currentBudget, toolName);
-            // Further reduce if context health is poor
             const capFactor = getToolResultCapFactor(health);
             maxResultChars = Math.floor(maxResultChars * capFactor);
           }
@@ -306,7 +278,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             resultText = resultText.slice(0, maxResultChars) + '\n... [truncated — use offset/limit for large files]';
           }
 
-          // Security: sanitize and wrap tool results with boundary markers
           resultText = sanitizeToolResult(resultText);
           resultText = wrapToolResult(toolName, resultText);
 
@@ -314,10 +285,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           this.emit('tool_result', toolName, resultText, result.success);
         }
 
-        // Loop continues — model will see tool results and respond
       }
 
-      // Hit max iterations
       addMessage(sessionId, 'assistant', '[Max tool iterations reached]');
       this.emit('done', '[Max tool iterations reached]');
     } catch (err) {
@@ -327,13 +296,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     }
   }
 
-  /**
-   * Request approval from the user for a dangerous tool call.
-   * Returns the user's decision.
-   */
   private requestApproval(toolName: string, args: Record<string, unknown>): Promise<ApprovalResult> {
     return new Promise<ApprovalResult>((resolve) => {
-      // If no listeners are attached, auto-approve (headless/gateway mode)
       if (this.listenerCount('approval_needed') === 0) {
         resolve('approve');
         return;
@@ -345,10 +309,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     });
   }
 
-  /**
-   * Analyze task complexity and auto-spawn subagents if the task is parallelizable.
-   * Returns true if orchestration happened (subagents handled the task), false otherwise.
-   */
   private async maybeOrchestrate(sessionId: string, userMessage: string, model: string): Promise<boolean> {
     try {
       const provider = getProvider('ollama');
@@ -400,9 +360,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
         }
       }
 
-      // Parse the JSON response
       response = response.trim();
-      // Strip markdown code fences if present
       if (response.startsWith('```')) {
         response = response.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
       }
@@ -411,25 +369,20 @@ Each subtask description must be self-contained with ALL context needed (file pa
       try {
         analysis = JSON.parse(response);
       } catch {
-        return false; // Can't parse → fall through to normal execution
-      }
+        return false;       }
 
       if (!analysis.complex || !analysis.subtasks?.length) {
         return false;
       }
 
-      // Resolve partial model names to full IDs from available models
       if (availableModels.length > 0) {
         for (const sub of analysis.subtasks) {
           if (sub.model && sub.model !== 'null') {
-            // Check if model is already a valid full name
             if (!availableModels.includes(sub.model)) {
-              // Try to find a matching model (partial match)
               const match = availableModels.find(m => m.startsWith(sub.model + ':') || m === sub.model);
               if (match) {
                 sub.model = match;
               } else {
-                // No match found — fall back to default model
                 sub.model = null;
               }
             }
@@ -437,29 +390,22 @@ Each subtask description must be self-contained with ALL context needed (file pa
         }
       }
 
-      // Orchestrate! Spawn subagents and wait for results
       const runId = randomUUID();
       const orchestrationStart = Date.now();
 
-      // Persist orchestration run
       createOrchestrationRun(runId, sessionId, userMessage, analysis.subtasks.length);
 
       this.emit('chunk', `🔀 Tarefa complexa detectada — spawnando ${analysis.subtasks.length} subagentes... (run: ${runId.slice(0, 8)})\n\n`);
 
       const manager = getSubagentManager();
 
-      // Pre-warm sessions to eliminate DB writes from spawn critical path
       manager.prewarm(analysis.subtasks.length);
 
-      // Build subtask descriptors and spawn in parallel
       const subtaskDescriptors = analysis.subtasks.map(sub => ({
         task: sub.task,
         model: (sub.model && sub.model !== 'null') ? sub.model : undefined,
       }));
 
-      // Register listeners BEFORE spawning so no events are missed.
-      // taskLabels is populated after spawn returns the IDs, but the
-      // handlers use a Set for filtering which is also filled post-spawn.
       const taskLabels = new Map<string, string>();
       const spawnedTaskIds = new Set<string>();
 
@@ -486,7 +432,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         this.emit('subagent_status', taskId, label, 'failed', task?.durationMs);
       };
 
-      // Track orchestration progress
       const total = analysis.subtasks.length;
       let progressCompleted = 0;
       let progressFailed = 0;
@@ -526,7 +471,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         emitProgress();
       };
 
-      // Register ALL listeners BEFORE spawning so no events are missed
       manager.on('task:chunk', onSubagentChunk);
       manager.on('task:started', onSubagentStarted);
       manager.on('task:completed', onSubagentCompleted);
@@ -537,7 +481,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       const taskIds = await manager.spawnMany(sessionId, subtaskDescriptors, runId);
 
-      // Now populate the label map and filter set
       for (let i = 0; i < analysis.subtasks.length; i++) {
         const sub = analysis.subtasks[i];
         const label = sub.task.slice(0, 60).replace(/\n/g, ' ');
@@ -548,10 +491,8 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       this.emit('chunk', `\n⏳ Aguardando ${taskIds.length} subagentes...\n`);
 
-      // Emit initial progress now that IDs are known
       emitProgress();
 
-      // Incremental result streaming: emit each sub-agent's result as it finishes
       const resultLines: string[] = [];
       const taskIdToIndex = new Map(taskIds.map((id, i) => [id, i]));
       let earlyCompleted = 0;
@@ -562,8 +503,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
         const onEarlyResult = (taskId: string) => {
           if (!taskIds.includes(taskId)) return;
-          if (seen.has(taskId)) return; // Deduplicate: event + manual scan
-          seen.add(taskId);
+          if (seen.has(taskId)) return;           seen.add(taskId);
 
           const task = manager.getTask(taskId)!;
           const idx = taskIdToIndex.get(taskId)!;
@@ -591,7 +531,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         manager.on('task:completed', onEarlyResult);
         manager.on('task:failed', onEarlyResult);
 
-        // Check if any already finished before we subscribed
         for (const id of taskIds) {
           const t = manager.getTask(id);
           if (t && (t.status === 'completed' || t.status === 'failed')) {
@@ -600,7 +539,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         }
       });
 
-      // Clean up listeners
       manager.off('task:started', onTaskStarted);
       manager.off('task:completed', onTaskCompleted);
       manager.off('task:failed', onTaskFailed);
@@ -609,7 +547,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
       manager.off('task:completed', onSubagentCompleted);
       manager.off('task:failed', onSubagentFailed);
 
-      // Complete orchestration run in DB
       const orchestrationDuration = Date.now() - orchestrationStart;
       const allDone = results.every(r => r.status === 'completed');
       completeOrchestrationRun(runId, allDone ? 'completed' : 'failed', orchestrationDuration);
@@ -619,7 +556,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       this.emit('chunk', `\n✅ ${completed} completados, ${failed > 0 ? `❌ ${failed} falharam` : 'nenhuma falha'}\n\n`);
 
-      // Conditional synthesis: only call LLM if there are failures requiring explanation
       let synthesisText = '';
       if (failed > 0) {
         try {
@@ -654,11 +590,9 @@ Each subtask description must be self-contained with ALL context needed (file pa
             }
           }
         } catch {
-          // Synthesis failed — results were already streamed incrementally
         }
       }
 
-      // Save the full orchestration output as assistant message
       const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
       const fullOutput = `🔀 ${analysis.subtasks.length} subagentes executados (${completed} ok, ${failed} falhas)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
       addMessage(sessionId, 'assistant', fullOutput);
@@ -666,7 +600,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
       this.maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500));
       return true;
     } catch (err) {
-      // Orchestration failed — fall through to normal execution
       return false;
     }
   }
@@ -676,7 +609,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const session = getSession(sessionId);
       if (!session || session.title !== 'New Session') return;
 
-      // Only on the first exchange (user + assistant = 2 messages, plus system)
       const count = getMessageCount(sessionId);
       if (count > 4) return;
 
@@ -707,7 +639,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         this.emit('title', title);
       }
     } catch {
-      // Title generation is non-critical
     }
   }
 
@@ -720,7 +651,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
     try {
       const existingCompaction = getLatestCompaction(sessionId);
 
-      // Deserialize existing compaction if structured
       let existingStructured: StructuredCompaction | null = null;
       if (existingCompaction) {
         existingStructured = deserializeCompaction(
@@ -729,7 +659,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         );
       }
 
-      // Perform structured compaction
       const structured = await performStructuredCompaction(
         compactable.messages,
         existingStructured,
@@ -742,7 +671,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
       }
     } catch {
-      // Compaction is non-critical — don't break the agent loop
     }
   }
 
@@ -773,7 +701,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
         saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
       }
     } catch {
-      // Emergency compaction failed — continue anyway
     }
   }
 
@@ -782,17 +709,9 @@ Each subtask description must be self-contained with ALL context needed (file pa
   }
 }
 
-/**
- * Heuristic to detect if a local model's response indicates it needs tool access.
- * Detects 3 patterns:
- * 1. Explicit refusal ("não consigo acessar...")
- * 2. Simulated shell commands written as text (cat /etc/os-release)
- * 3. Intent to act without action ("vou verificar...", "let me check...")
- */
 function needsToolCalling(text: string): boolean {
   const lower = text.toLowerCase();
 
-  // Category 1: Explicit refusal
   const refusalIndicators = [
     'não consigo acessar', 'não consigo executar', 'não consigo rodar',
     'não tenho acesso', 'não posso executar', 'não posso rodar',
@@ -811,7 +730,6 @@ function needsToolCalling(text: string): boolean {
   ];
   if (refusalIndicators.some(i => lower.includes(i))) return true;
 
-  // Category 2: Model writes shell commands as text (simulating execution)
   const shellPatterns = [
     /^\s*(?:cat|ls|cd|grep|find|echo|pwd|whoami|uname|head|tail|wc|mkdir|rm|cp|mv|chmod|curl|wget|pip|npm|git|python|node|docker)\s+\S/m,
     /^\s*\$\s+\w+/m,
@@ -819,7 +737,6 @@ function needsToolCalling(text: string): boolean {
   ];
   if (shellPatterns.some(p => p.test(text))) return true;
 
-  // Category 3: Model expresses intent to act (but can't without tools)
   const intentIndicators = [
     'vou verificar', 'vou checar', 'deixa eu ver', 'deixe-me verificar',
     'vou executar', 'vou rodar', 'vou ler o arquivo', 'vou listar',
