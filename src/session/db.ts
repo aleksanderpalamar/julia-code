@@ -116,6 +116,10 @@ function initSchema(db: Database.Database): void {
   if (!compCols.some(c => c.name === 'format')) {
     db.exec("ALTER TABLE compactions ADD COLUMN format TEXT NOT NULL DEFAULT 'text'");
   }
+
+  if (!msgCols.some(c => c.name === 'model')) {
+    db.exec('ALTER TABLE messages ADD COLUMN model TEXT');
+  }
 }
 
 export function closeDb(): void {
