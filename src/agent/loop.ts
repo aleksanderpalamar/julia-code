@@ -138,6 +138,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       let currentBudget: ContextBudget | null = null;
       const hasToolModel = loopModel !== auxModel;
       let switchedToCloud = false;
+      let lastHadToolCalls = false;
+      let retryCount = 0;
 
       const localHasTools = hasToolModel ? await supportsTools(auxModel) : false;
 
@@ -207,10 +209,21 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
               }
               break;
             case 'error':
-              this.emit('error', chunk.error!);
-              this.running = false;
-              return;
+              if (lastHadToolCalls && retryCount < 1) {
+                retryCount++;
+                this.emit('clear_streaming');
+                fullText = '__RETRY__';
+              } else {
+                this.emit('error', chunk.error!);
+                this.emit('done', '');
+                this.running = false;
+                return;
+              }
           }
+        }
+
+        if (fullText === '__RETRY__') {
+          continue;
         }
 
         const localFailedTools = localHasTools && hasToolModel && !switchedToCloud
@@ -223,7 +236,12 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           continue;
         }
 
-        addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined);
+        if (fullText === '' && toolCalls.length === 0 && lastHadToolCalls && retryCount < 1) {
+          retryCount++;
+          continue;
+        }
+
+        addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined, undefined, undefined, currentModel);
 
         if (toolCalls.length === 0) {
           this.emit('done', fullText);
@@ -231,6 +249,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           this.running = false;
           return;
         }
+
+        retryCount = 0;
 
         for (const tc of toolCalls) {
           if (this.abortController?.signal.aborted) {
@@ -285,9 +305,10 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           this.emit('tool_result', toolName, resultText, result.success);
         }
 
+        lastHadToolCalls = true;
       }
 
-      addMessage(sessionId, 'assistant', '[Max tool iterations reached]');
+      addMessage(sessionId, 'assistant', '[Max tool iterations reached]', undefined, undefined, undefined, auxModel);
       this.emit('done', '[Max tool iterations reached]');
     } catch (err) {
       this.emit('error', err instanceof Error ? err.message : String(err));
@@ -595,7 +616,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
       const fullOutput = `🔀 ${analysis.subtasks.length} subagentes executados (${completed} ok, ${failed} falhas)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
-      addMessage(sessionId, 'assistant', fullOutput);
+      addMessage(sessionId, 'assistant', fullOutput, undefined, undefined, undefined, model);
       this.emit('done', fullOutput);
       this.maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500));
       return true;

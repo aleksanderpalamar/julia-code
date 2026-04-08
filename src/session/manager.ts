@@ -19,6 +19,7 @@ export interface Message {
   tool_calls?: string | null;
   tool_call_id?: string | null;
   images?: string | null;
+  model?: string | null;
   created_at: string;
 }
 
@@ -60,19 +61,21 @@ export function addMessage(
   content: string,
   toolCalls?: object[],
   toolCallId?: string,
-  images?: string[]
+  images?: string[],
+  model?: string
 ): Message {
   const db = getDb();
 
   db.prepare(
-    'INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, images) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, images, model) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(
     sessionId,
     role,
     content,
     toolCalls ? JSON.stringify(toolCalls) : null,
     toolCallId ?? null,
-    images?.length ? JSON.stringify(images) : null
+    images?.length ? JSON.stringify(images) : null,
+    model ?? null
   );
 
   db.prepare(
@@ -179,6 +182,13 @@ export function listMemories(category?: string, limit = 20): Memory[] {
 export function deleteMemory(key: string): boolean {
   const result = getDb().prepare('DELETE FROM memories WHERE key = ?').run(key);
   return result.changes > 0;
+}
+
+export function getLastAssistantModel(sessionId: string): string | null {
+  const row = getDb().prepare(
+    'SELECT model FROM messages WHERE session_id = ? AND role = ? AND model IS NOT NULL ORDER BY id DESC LIMIT 1'
+  ).get(sessionId, 'assistant') as { model: string } | undefined;
+  return row?.model ?? null;
 }
 
 export function getRecentMemories(limit = 15): Memory[] {

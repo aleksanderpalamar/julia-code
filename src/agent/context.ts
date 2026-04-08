@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../providers/types.js';
-import { getMessages, getLatestCompaction, getRecentMemories, type Message } from '../session/manager.js';
+import { getMessages, getLatestCompaction, getRecentMemories, getLastAssistantModel, type Message } from '../session/manager.js';
 import { loadSkills, loadUserSkills, loadTemperamentSkill } from '../skills/loader.js';
 import { getConfig } from '../config/index.js';
 import { getProjectDir } from '../config/workspace.js';
@@ -77,6 +77,8 @@ export async function buildContext(
     if (memoryLines.length > 0) {
       memoriesSection = [
         `## Your Memories`,
+        `IMPORTANT: ALWAYS check these memories BEFORE executing tools or commands.`,
+        `If the answer to the user's question is already here, respond directly without making tool calls.`,
         `These are facts you saved from previous sessions:`,
         ...memoryLines,
         ``,
@@ -87,6 +89,14 @@ export async function buildContext(
 
   if (memoriesSection) {
     messages.push({ role: 'system', content: memoriesSection });
+  }
+
+  const lastModel = getLastAssistantModel(sessionId);
+  if (lastModel && lastModel !== model) {
+    messages.push({
+      role: 'system',
+      content: `## Model Switch Context\nThe previous messages in this session were handled by model "${lastModel}". You are now "${model}". The conversation continues in the same session — all prior messages, tool results, and context are yours. Continue naturally from where the previous model left off.`,
+    });
   }
 
   if (compaction) {
