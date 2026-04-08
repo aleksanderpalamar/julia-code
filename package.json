@@ -1,6 +1,6 @@
 {
   "name": "juliacode",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Julia Code (juju) - AI coding assistant TUI powered by local models via Ollama",
   "license": "GPL-3.0-only",
   "type": "module",
