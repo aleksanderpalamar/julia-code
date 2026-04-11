@@ -39,7 +39,7 @@ export const memoryTool: ToolDefinition = {
     required: ['action'],
   },
 
-  async execute(args) {
+  async execute(args, _context?) {
     const action = args.action as string;
 
     switch (action) {

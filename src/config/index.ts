@@ -82,6 +82,7 @@ export function loadConfig(): Config {
     acpSubagentMaxIterations: settings?.acp?.subagentMaxIterations,
     acpDefaultModel: settings?.acp?.defaultModel,
     acpCancelOnFailure: settings?.acp?.cancelOnFailure,
+    acpWorktreeIsolation: settings?.acp?.worktreeIsolation,
     toolModel: settings?.models?.toolModel,
     defaultTemperament: settings?.temperament?.default,
     contextReservePercent: settings?.context?.reservePercent,

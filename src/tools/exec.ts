@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
-import type { ToolDefinition } from './types.js';
-import { getProjectDir } from '../config/workspace.js';
+import type { ToolDefinition, ToolContext } from './types.js';
+import { getActiveToolContext } from './registry.js';
 import { buildSafeEnv } from '../security/permissions.js';
 
 export const execTool: ToolDefinition = {
@@ -25,9 +25,10 @@ export const execTool: ToolDefinition = {
     required: ['command'],
   },
 
-  async execute(args) {
+  async execute(args, context?) {
+    const ctx = context ?? getActiveToolContext();
     const command = args.command as string;
-    const cwd = (args.cwd as string) || getProjectDir();
+    const cwd = (args.cwd as string) || ctx.projectDir;
     const timeout = (args.timeout as number) || 30000;
 
     try {
