@@ -1,6 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
-import { getProjectDir, getWorkspace } from '../config/workspace.js';
+import { getWorkspace } from '../config/workspace.js';
+import { getActiveToolContext } from '../tools/registry.js';
 
 const DENIED_PATH_PATTERNS: RegExp[] = [
   /\/\.ssh\//,
@@ -75,7 +76,7 @@ export function validateWritePath(inputPath: string): string {
 }
 
 function resolveAndContain(inputPath: string): string {
-  const projectDir = getProjectDir();
+  const projectDir = getActiveToolContext().projectDir;
   const juliaHome = path.join(os.homedir(), '.juliacode');
   const workspace = getWorkspace();
 

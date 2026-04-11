@@ -21,7 +21,7 @@ export const writeTool: ToolDefinition = {
     required: ['path', 'content'],
   },
 
-  async execute(args) {
+  async execute(args, _context?) {
     const filePath = validateWritePath(args.path as string);
     const content = args.content as string;
 

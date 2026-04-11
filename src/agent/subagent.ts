@@ -3,6 +3,10 @@ import { EventEmitter } from 'node:events';
 import { AgentLoop } from './loop.js';
 import { createSession, createSubagentRun, updateSubagentRunStatus } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
+import { getProjectDir } from '../config/workspace.js';
+import { createWorktree, removeWorktree, mergeWorktree, isGitRepo, type Worktree } from './worktree.js';
+import { toolContextStorage } from '../tools/registry.js';
+import type { ToolContext } from '../tools/types.js';
 
 export interface SubagentTask {
   id: string;
@@ -171,6 +175,32 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     });
     this.agents.set(task.id, agent);
 
+    // Create worktree for filesystem isolation if enabled
+    let worktree: Worktree | null = null;
+    let toolContext: ToolContext;
+
+    if (config.acpWorktreeIsolation && isGitRepo()) {
+      try {
+        worktree = createWorktree(task.id);
+        toolContext = {
+          projectDir: worktree.path,
+          isWorktree: true,
+          worktreeId: worktree.id,
+        };
+      } catch {
+        worktree = null;
+        toolContext = {
+          projectDir: getProjectDir(),
+          isWorktree: false,
+        };
+      }
+    } else {
+      toolContext = {
+        projectDir: getProjectDir(),
+        isWorktree: false,
+      };
+    }
+
     let resultText = '';
 
     agent.on('chunk', (text) => {
@@ -178,9 +208,27 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       this.emit('task:chunk', task.id, text);
     });
 
-    agent.on('done', (fullText) => {
+    agent.on('done', async (fullText) => {
       if (task.status === 'completed' || task.status === 'failed') return;
-      const result = fullText || resultText;
+
+      let mergeInfo = '';
+      if (worktree) {
+        try {
+          const mergeResult = await mergeWorktree(worktree);
+          if (mergeResult.merged) {
+            mergeInfo = `\n[Worktree merged: ${mergeResult.commitSha?.slice(0, 8)}]`;
+          } else if (mergeResult.reason === 'conflict') {
+            mergeInfo = `\n[⚠️ Merge conflict — changes preserved on branch ${mergeResult.branch}]`;
+          } else {
+            mergeInfo = '\n[No file changes in worktree]';
+          }
+        } catch {
+          mergeInfo = '\n[⚠️ Worktree merge failed]';
+        }
+        removeWorktree(worktree);
+      }
+
+      const result = (fullText || resultText) + mergeInfo;
       task.status = 'completed';
       task.result = result;
       task.completedAt = new Date();
@@ -198,6 +246,11 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
     agent.on('error', (error) => {
       if (task.status === 'completed' || task.status === 'failed') return;
+
+      if (worktree) {
+        removeWorktree(worktree);
+      }
+
       task.status = 'failed';
       task.error = error;
       task.completedAt = new Date();
@@ -213,22 +266,30 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       this.drainQueue();
     });
 
-    agent.run(task.sessionId, task.task, model).catch((err) => {
-      if (task.status === 'completed' || task.status === 'failed') return;
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      task.status = 'failed';
-      task.error = errorMsg;
-      task.completedAt = new Date();
-      task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
-      updateSubagentRunStatus(task.id, 'failed', {
-        completedAt: task.completedAt.toISOString(),
-        durationMs: task.durationMs,
-        error: task.error,
+    // Run agent inside AsyncLocalStorage so all tools see the worktree path
+    toolContextStorage.run(toolContext, () => {
+      agent.run(task.sessionId, task.task, model).catch((err) => {
+        if (task.status === 'completed' || task.status === 'failed') return;
+
+        if (worktree) {
+          removeWorktree(worktree);
+        }
+
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        task.status = 'failed';
+        task.error = errorMsg;
+        task.completedAt = new Date();
+        task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
+        updateSubagentRunStatus(task.id, 'failed', {
+          completedAt: task.completedAt.toISOString(),
+          durationMs: task.durationMs,
+          error: task.error,
+        });
+        this.agents.delete(task.id);
+        this.running--;
+        this.emit('task:failed', task.id, errorMsg);
+        this.drainQueue();
       });
-      this.agents.delete(task.id);
-      this.running--;
-      this.emit('task:failed', task.id, errorMsg);
-      this.drainQueue();
     });
   }
 

@@ -10,6 +10,7 @@ import { initWorkspace } from './src/config/workspace.js';
 import { startGateway } from './src/gateway/server.js';
 import { initMcpServers, shutdownMcpServers } from './src/mcp/index.js';
 import { syncAvailableModels } from './src/config/mcp.js';
+import { cleanupOrphanedWorktrees } from './src/agent/worktree.js';
 
 // Bootstrap
 async function bootstrap() {
@@ -20,6 +21,7 @@ async function bootstrap() {
   reloadConfig();   // Reload config after sync (toolModel may have been auto-configured)
   initTools();      // Register tools
   initWorkspace();  // Create workspace directory
+  cleanupOrphanedWorktrees();  // Remove stale worktrees from previous runs
   await initMcpServers();  // Connect MCP servers and register their tools
 }
 
@@ -57,8 +59,19 @@ if (mode === 'gateway') {
   );
 
   waitUntilExit().then(async () => {
+    cleanupOrphanedWorktrees();
     await shutdownMcpServers();
     closeDb();
     process.exit(0);
   });
 }
+
+// Cleanup worktrees on unexpected exit
+process.on('SIGINT', () => {
+  cleanupOrphanedWorktrees();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  cleanupOrphanedWorktrees();
+  process.exit(0);
+});

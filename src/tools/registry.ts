@@ -1,6 +1,8 @@
-import type { ToolDefinition, ToolResult } from './types.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ToolDefinition, ToolResult, ToolContext } from './types.js';
 import type { ToolSchema } from '../providers/types.js';
 import { toolToSchema } from './types.js';
+import { getProjectDir } from '../config/workspace.js';
 
 import { execTool } from './exec.js';
 import { readTool } from './read.js';
@@ -14,6 +16,15 @@ import { memoryTool } from './memory.js';
 import { subagentTool } from './subagent.js';
 
 const tools = new Map<string, ToolDefinition>();
+
+export const toolContextStorage = new AsyncLocalStorage<ToolContext>();
+
+export function getActiveToolContext(): ToolContext {
+  return toolContextStorage.getStore() ?? {
+    projectDir: getProjectDir(),
+    isWorktree: false,
+  };
+}
 
 export function registerTool(tool: ToolDefinition): void {
   tools.set(tool.name, tool);
@@ -34,7 +45,8 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
   }
 
   try {
-    return await tool.execute(args);
+    const context = getActiveToolContext();
+    return await tool.execute(args, context);
   } catch (err) {
     return {
       success: false,

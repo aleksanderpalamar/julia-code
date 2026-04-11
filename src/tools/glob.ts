@@ -1,8 +1,8 @@
 import { readdir } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { minimatch } from 'minimatch';
-import type { ToolDefinition } from './types.js';
-import { getProjectDir } from '../config/workspace.js';
+import type { ToolDefinition, ToolContext } from './types.js';
+import { getActiveToolContext } from './registry.js';
 
 export const globTool: ToolDefinition = {
   name: 'glob',
@@ -22,9 +22,10 @@ export const globTool: ToolDefinition = {
     required: ['pattern'],
   },
 
-  async execute(args) {
+  async execute(args, context?) {
+    const ctx = context ?? getActiveToolContext();
     const pattern = args.pattern as string;
-    const cwd = resolve((args.cwd as string) || getProjectDir());
+    const cwd = resolve((args.cwd as string) || ctx.projectDir);
 
     try {
       const matches = await findMatches(cwd, pattern);

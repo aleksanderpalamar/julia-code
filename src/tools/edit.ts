@@ -28,7 +28,7 @@ export const editTool: ToolDefinition = {
     required: ['path', 'old_string', 'new_string'],
   },
 
-  async execute(args) {
+  async execute(args, _context?) {
     const filePath = validateWritePath(args.path as string);
     const oldStr = args.old_string as string;
     const newStr = args.new_string as string;

@@ -14,6 +14,7 @@ export const ConfigSchema = z.object({
   acpSubagentMaxIterations: z.number().default(20),
   acpDefaultModel: z.string().nullable().default(null),
   acpCancelOnFailure: z.boolean().default(false),
+  acpWorktreeIsolation: z.boolean().default(true),
   toolModel: z.string().nullable().default(null),
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   contextReservePercent: z.number().default(0.15),
@@ -69,6 +70,7 @@ export const SettingsSchema = z.object({
     subagentMaxIterations: z.number().default(15),
     defaultModel: z.string().nullable().default(null),
     cancelOnFailure: z.boolean().default(false),
+    worktreeIsolation: z.boolean().default(true),
   }).optional(),
   temperament: z.object({
     default: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),

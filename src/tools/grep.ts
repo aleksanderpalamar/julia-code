@@ -28,7 +28,7 @@ export const grepTool: ToolDefinition = {
     required: ['pattern'],
   },
 
-  async execute(args) {
+  async execute(args, _context?) {
     const pattern = args.pattern as string;
     const searchPath = validateReadPath((args.path as string) || '.');
     const ignoreCase = args.ignore_case as boolean;

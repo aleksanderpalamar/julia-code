@@ -24,7 +24,7 @@ export const readTool: ToolDefinition = {
     required: ['path'],
   },
 
-  async execute(args) {
+  async execute(args, _context?) {
     const filePath = validateReadPath(args.path as string);
 
     try {

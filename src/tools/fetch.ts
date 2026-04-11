@@ -32,7 +32,7 @@ export const fetchTool: ToolDefinition = {
     required: ['url'],
   },
 
-  async execute(args) {
+  async execute(args, _context?) {
     const url = args.url as string;
     const method = (args.method as string) ?? 'GET';
     const headers = (args.headers as Record<string, string>) ?? {};
