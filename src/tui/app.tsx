@@ -463,6 +463,7 @@ export function App({ sessionId }: Props) {
           mode={mode}
           pendingImageCount={pendingImages.length}
           pasteInProgress={pasteInProgress}
+          orchestrationProgress={orchestrationProgress}
         />
       </Box>
     </Box>
