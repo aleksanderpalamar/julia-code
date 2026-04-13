@@ -18,6 +18,13 @@ interface Props {
   mode: AgentMode;
   pendingImageCount?: number;
   pasteInProgress?: React.MutableRefObject<boolean>;
+  orchestrationProgress?: {
+    total: number;
+    completed: number;
+    failed: number;
+    running: number;
+    queued: number;
+  } | null;
 }
 
 export function Input({
@@ -29,6 +36,7 @@ export function Input({
   mode,
   pendingImageCount,
   pasteInProgress,
+  orchestrationProgress,
 }: Props) {
   const [value, setValue] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -151,7 +159,18 @@ export function Input({
             <Text color="cyan" bold>[{pendingImageCount} img]</Text>
           </>
         )}
-        {isThinking && (
+        {orchestrationProgress && (
+          <>
+            <Text color="gray"> | </Text>
+            <Text color="cyan">
+              <Spinner type="dots" /> ACP [{orchestrationProgress.completed}/{orchestrationProgress.total} done
+              {orchestrationProgress.running > 0 ? `, ${orchestrationProgress.running} running` : ''}
+              {orchestrationProgress.queued > 0 ? `, ${orchestrationProgress.queued} queued` : ''}
+              {orchestrationProgress.failed > 0 ? `, ${orchestrationProgress.failed} failed` : ''}]
+            </Text>
+          </>
+        )}
+        {isThinking && !orchestrationProgress && (
           <>
             <Text color="gray"> | </Text>
             <Text color="magenta">
