@@ -87,6 +87,6 @@ export const SettingsSchema = z.object({
       pattern: z.string(),
     })).default([]),
   }).optional(),
-});
+}).passthrough();
 
 export type Settings = z.infer<typeof SettingsSchema>;
