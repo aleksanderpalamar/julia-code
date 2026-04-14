@@ -1,131 +1,131 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { getSettingsPath } from './index.js';
-import { SettingsSchema, type Settings, type McpServerConfig } from './types.js';
+import { readRawSettings, updateRawSettings } from './settings-io.js';
+import type { McpServerConfig } from './types.js';
 
-function readSettings(): Settings {
-  const path = getSettingsPath();
-  if (!existsSync(path)) return {};
+export function getMcpServerConfigs(): Record<string, McpServerConfig> {
   try {
-    return SettingsSchema.parse(JSON.parse(readFileSync(path, 'utf-8')));
+    const raw = readRawSettings();
+    const mcp = raw.mcpServers;
+    return (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) ? mcp : {};
   } catch {
     return {};
   }
 }
 
-function writeSettings(settings: Settings): void {
-  const path = getSettingsPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2), 'utf-8');
-}
-
-export function getMcpServerConfigs(): Record<string, McpServerConfig> {
-  const settings = readSettings();
-  return settings.mcpServers ?? {};
-}
-
 export function addMcpServerConfig(name: string, config: McpServerConfig): void {
-  const settings = readSettings();
-  if (!settings.mcpServers) {
-    settings.mcpServers = {};
-  }
-  settings.mcpServers[name] = config;
-  writeSettings(settings);
+  updateRawSettings(raw => {
+    if (!raw.mcpServers || typeof raw.mcpServers !== 'object' || Array.isArray(raw.mcpServers)) {
+      raw.mcpServers = {};
+    }
+    raw.mcpServers[name] = config;
+  });
 }
 
 export function removeMcpServerConfig(name: string): void {
-  const settings = readSettings();
-  if (settings.mcpServers) {
-    delete settings.mcpServers[name];
+  updateRawSettings(raw => {
+    if (raw.mcpServers && typeof raw.mcpServers === 'object') {
+      delete raw.mcpServers[name];
+    }
+  });
+}
+
+function ensureModels(raw: Record<string, any>): Record<string, any> {
+  if (!raw.models || typeof raw.models !== 'object' || Array.isArray(raw.models)) {
+    raw.models = {
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      default: '',
+      toolModel: null,
+      available: [],
+    };
   }
-  writeSettings(settings);
+  return raw.models;
 }
 
 export function setDefaultModel(modelId: string): void {
-  const settings = readSettings();
-  if (!settings.models) {
-    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: modelId, toolModel: null, available: [] };
-  } else {
-    settings.models.default = modelId;
-  }
-  writeSettings(settings);
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
+    models.default = modelId;
+  });
 }
 
 export function setToolModel(modelId: string): void {
-  const settings = readSettings();
-  if (!settings.models) {
-    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: '', toolModel: modelId, available: [] };
-  } else {
-    settings.models.toolModel = modelId;
-  }
-  writeSettings(settings);
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
+    models.toolModel = modelId;
+  });
 }
 
 export function clearToolModel(): void {
-  const settings = readSettings();
-  if (settings.models) {
-    settings.models.toolModel = null;
-  }
-  writeSettings(settings);
+  updateRawSettings(raw => {
+    if (raw.models && typeof raw.models === 'object') {
+      raw.models.toolModel = null;
+    }
+  });
 }
 
 export function getAvailableModels(): Array<{ id: string; name?: string; isCloud?: boolean }> {
-  const settings = readSettings();
-  return settings.models?.available ?? [];
+  try {
+    const raw = readRawSettings();
+    const available = raw.models?.available;
+    return Array.isArray(available) ? available : [];
+  } catch {
+    return [];
+  }
 }
 
 export function getCurrentModel(): string {
-  const settings = readSettings();
-  return settings.models?.default ?? '';
+  try {
+    const raw = readRawSettings();
+    const def = raw.models?.default;
+    return typeof def === 'string' ? def : '';
+  } catch {
+    return '';
+  }
 }
 
 export async function syncAvailableModels(): Promise<void> {
   const { listOllamaModelsDetailed } = await import('../providers/ollama.js');
-  const { classifyModels, selectToolModel } = await import('../providers/model-classifier.js');
+  const { classifyModels, selectToolModel, selectFastModel } = await import('../providers/model-classifier.js');
 
   const detailedModels = await listOllamaModelsDetailed();
   const classified = classifyModels(detailedModels);
-  const settings = readSettings();
 
-  if (!settings.models) {
-    settings.models = { provider: 'ollama', baseUrl: 'http://localhost:11434', default: '', toolModel: null, available: [] };
-  }
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
 
-  settings.models!.available = classified.map(m => ({
-    id: m.id,
-    name: m.id,
-    isCloud: m.isCloud,
-  }));
+    models.available = classified.map(m => ({
+      id: m.id,
+      name: m.id,
+      isCloud: m.isCloud,
+    }));
 
-  const { selectFastModel } = await import('../providers/model-classifier.js');
-  const hasLocal = classified.some(m => m.isLocal);
-  const hasCloud = classified.some(m => m.isCloud);
-  const currentDefault = settings.models!.default;
-  const currentDefaultIsCloud = classified.find(m => m.id === currentDefault)?.isCloud ?? false;
+    const hasLocal = classified.some(m => m.isLocal);
+    const hasCloud = classified.some(m => m.isCloud);
+    const currentDefault = typeof models.default === 'string' ? models.default : '';
+    const currentDefaultIsCloud = classified.find(m => m.id === currentDefault)?.isCloud ?? false;
 
-  if (!settings.models!.toolModel && hasLocal && hasCloud) {
-    if (currentDefaultIsCloud) {
-      settings.models!.toolModel = currentDefault;
+    if (!models.toolModel && hasLocal && hasCloud) {
+      if (currentDefaultIsCloud) {
+        models.toolModel = currentDefault;
+        const fast = selectFastModel(classified);
+        if (fast) {
+          models.default = fast;
+        }
+      } else {
+        const autoTool = selectToolModel(classified, currentDefault);
+        if (autoTool) {
+          models.toolModel = autoTool;
+        }
+      }
+    }
+
+    if (!models.default && classified.length > 0) {
       const fast = selectFastModel(classified);
       if (fast) {
-        settings.models!.default = fast;
-      }
-    } else {
-      const autoTool = selectToolModel(classified, currentDefault);
-      if (autoTool) {
-        settings.models!.toolModel = autoTool;
+        models.default = fast;
+      } else {
+        models.default = classified[0].id;
       }
     }
-  }
-
-  if (!settings.models!.default && classified.length > 0) {
-    const fast = selectFastModel(classified);
-    if (fast) {
-      settings.models!.default = fast;
-    } else {
-      settings.models!.default = classified[0].id;
-    }
-  }
-
-  writeSettings(settings);
+  });
 }

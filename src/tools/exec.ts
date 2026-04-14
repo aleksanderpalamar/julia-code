@@ -31,6 +31,15 @@ export const execTool: ToolDefinition = {
     const cwd = (args.cwd as string) || ctx.projectDir;
     const timeout = (args.timeout as number) || 30000;
 
+    if (/(^|[\s;&|`$(])juju\b/.test(command)) {
+      return {
+        success: false,
+        output: '',
+        error:
+          'Comando bloqueado: não é possível executar `juju` como subprocesso. Isso dispara o bootstrap da Julia em um child sem TTY, que reescreve ~/.juliacode/settings.json (perdendo mcpServers e trustedDirectories) e crasha em "Raw mode is not supported". Use os slash commands da TUI (/mcp, /model, /trust) ou peça ao usuário executar manualmente.',
+      };
+    }
+
     try {
       const output = execSync(command, {
         cwd,

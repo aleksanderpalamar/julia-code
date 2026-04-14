@@ -1,20 +1,43 @@
 import { McpClient } from './client.js';
 import { registerTool, unregisterToolsByPrefix } from '../tools/registry.js';
-import { getSettings } from '../config/index.js';
+import { readRawSettings } from '../config/settings-io.js';
 import type { ToolDefinition } from '../tools/types.js';
 import type { McpServerConfig } from '../config/types.js';
 
 const clients: McpClient[] = [];
 
 export async function initMcpServers(): Promise<void> {
-  const settings = getSettings();
-  const mcpServers = settings?.mcpServers;
-  if (!mcpServers) return;
+  let raw: Record<string, any>;
+  try {
+    raw = readRawSettings();
+  } catch {
+    return;
+  }
 
-  const entries = Object.entries(mcpServers);
+  const mcpServers = raw.mcpServers;
+  if (!mcpServers || typeof mcpServers !== 'object' || Array.isArray(mcpServers)) return;
+
+  const entries = Object.entries(mcpServers as Record<string, any>);
   if (entries.length === 0) return;
 
-  const connectPromises = entries.map(async ([serverName, config]) => {
+  const connectPromises = entries.map(async ([serverName, rawConfig]) => {
+    if (!rawConfig || typeof rawConfig !== 'object') {
+      process.stderr.write(`[mcp] Config inválida para '${serverName}': não é um objeto\n`);
+      return;
+    }
+    if (typeof rawConfig.command !== 'string' || !rawConfig.command) {
+      process.stderr.write(
+        `[mcp] Servidor '${serverName}' ignorado: transporte HTTP/SSE ainda não é suportado (sem 'command' stdio).\n`
+      );
+      return;
+    }
+
+    const config: McpServerConfig = {
+      command: rawConfig.command,
+      args: Array.isArray(rawConfig.args) ? rawConfig.args.filter((a: unknown): a is string => typeof a === 'string') : [],
+      env: (rawConfig.env && typeof rawConfig.env === 'object' && !Array.isArray(rawConfig.env)) ? rawConfig.env : undefined,
+    };
+
     const client = new McpClient(serverName, config);
     clients.push(client);
 

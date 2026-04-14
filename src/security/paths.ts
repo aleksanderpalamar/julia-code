@@ -25,6 +25,8 @@ const DENIED_PATH_PATTERNS: RegExp[] = [
   /\/\.config\/gh\//,
 ];
 
+const JULIA_SETTINGS_PATH = path.resolve(os.homedir(), '.juliacode', 'settings.json');
+
 const SYSTEM_WRITE_DENIED: RegExp[] = [
   /^\/etc\//,
   /^\/usr\//,
@@ -70,6 +72,12 @@ export function validateWritePath(inputPath: string): string {
 
   if (isSystemPath(resolved)) {
     throw new Error(`Acesso negado: não é permitido escrever em "${inputPath}" (caminho de sistema)`);
+  }
+
+  if (resolved === JULIA_SETTINGS_PATH) {
+    throw new Error(
+      `Acesso negado: "~/.juliacode/settings.json" é gerenciado pela própria Julia via slash commands (/mcp, /model, /trust). Edição direta via write/edit é bloqueada para evitar perda de campos.`
+    );
   }
 
   return resolved;
