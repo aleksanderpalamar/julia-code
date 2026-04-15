@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { AgentMode, Temperament } from "../types.js";
 import type { OrchestrationProgress } from "../../agent/loop.js";
@@ -23,6 +24,15 @@ function findPackageVersion(): string {
 }
 
 const APP_VERSION = findPackageVersion();
+
+function formatCwd(cwd: string, maxLen = 42): string {
+  const home = homedir();
+  let display = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+  if (display.length <= maxLen) return display;
+  const parts = display.split("/");
+  if (parts.length <= 3) return display;
+  return `${parts[0]}/.../${parts.slice(-2).join("/")}`;
+}
 
 interface Props {
   model: string;
@@ -61,7 +71,7 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
         flexDirection={isWide ? 'row' : 'column'}
       >
         {/* Left panel: Logo + info */}
-        <Box flexDirection="column" width={isWide ? "50%" : undefined}>
+        <Box flexDirection="column" flexGrow={isWide ? 1 : 0} flexBasis={isWide ? 0 : undefined}>
           {isNarrow ? (
             <Box>
               <Text color="cyan" bold>JULIA</Text>
@@ -85,7 +95,7 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
           )}
 
           <Box marginTop={1}>
-            <Text>    </Text>
+            <Text>  </Text>
             <Text color="yellow">{model}</Text>
             {toolModel && toolModel !== model && (
               <>
@@ -132,15 +142,16 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
           </Box>
 
           <Box>
-            <Text>    </Text>
-            <Text color="magenta">{cwd}</Text>
+            <Text>  </Text>
+            <Text color="magenta">{formatCwd(cwd)}</Text>
           </Box>
         </Box>
 
         {/* Right panel: Tips + Recent activity */}
         <Box
           flexDirection="column"
-          width={isWide ? "50%" : undefined}
+          flexGrow={isWide ? 1 : 0}
+          flexBasis={isWide ? 0 : undefined}
           paddingLeft={isWide ? 2 : 0}
           marginTop={isWide ? 0 : 1}
         >

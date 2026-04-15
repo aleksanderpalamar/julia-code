@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import type { Skill } from './types.js';
 import { scanForInjection } from '../security/sanitize.js';
+import { logMcp } from '../mcp/logger.js';
 
 const DEFAULTS_DIR = new URL('defaults/', import.meta.url).pathname;
 const USER_SKILLS_DIR = join(process.cwd(), 'data', 'skills');
@@ -25,7 +26,7 @@ export function loadUserSkills(): Skill[] {
 
     const stat = statSync(filePath);
     if (stat.size > MAX_SKILL_SIZE) {
-      process.stderr.write(`[security] Skill "${file}" excede ${MAX_SKILL_SIZE} bytes — ignorado\n`);
+      logMcp(`[security] Skill "${file}" excede ${MAX_SKILL_SIZE} bytes — ignorado`);
       continue;
     }
 
@@ -33,8 +34,8 @@ export function loadUserSkills(): Skill[] {
 
     const scan = scanForInjection(content);
     if (scan.isSuspicious) {
-      process.stderr.write(
-        `[security] Skill "${file}" contém padrões suspeitos (${scan.detections.join(', ')}) — ignorado\n`
+      logMcp(
+        `[security] Skill "${file}" contém padrões suspeitos (${scan.detections.join(', ')}) — ignorado`
       );
       continue;
     }
