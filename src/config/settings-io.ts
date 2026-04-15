@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getSettingsPath } from './index.js';
+import { logMcp } from '../mcp/logger.js';
 
 export type RawSettings = Record<string, any>;
 
@@ -11,8 +12,8 @@ export function readRawSettings(): RawSettings {
   try {
     text = readFileSync(path, 'utf-8');
   } catch (err) {
-    process.stderr.write(
-      `[config] Falha ao ler ${path}: ${err instanceof Error ? err.message : String(err)}\n`
+    logMcp(
+      `[config] Falha ao ler ${path}: ${err instanceof Error ? err.message : String(err)}`
     );
     throw err;
   }
@@ -20,8 +21,8 @@ export function readRawSettings(): RawSettings {
     const parsed = JSON.parse(text);
     return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
   } catch (err) {
-    process.stderr.write(
-      `[config] Falha ao parsear ${path}: ${err instanceof Error ? err.message : String(err)}. Atualização ignorada para evitar perda de dados.\n`
+    logMcp(
+      `[config] Falha ao parsear ${path}: ${err instanceof Error ? err.message : String(err)}. Atualização ignorada para evitar perda de dados.`
     );
     throw err;
   }

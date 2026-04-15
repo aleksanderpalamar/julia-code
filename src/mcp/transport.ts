@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { buildSafeEnv } from '../security/permissions.js';
+import { logMcp } from './logger.js';
 
 interface PendingRequest {
   resolve: (result: unknown) => void;
@@ -73,7 +74,7 @@ export class McpTransport extends EventEmitter {
       const lines = chunk.toString().trim();
       if (lines) {
         for (const line of lines.split('\n')) {
-          process.stderr.write(`[mcp:${this.command}] ${line}\n`);
+          logMcp(`[mcp:${this.command}] ${line}`);
         }
       }
     });

@@ -1,6 +1,7 @@
 import { McpClient } from './client.js';
 import { registerTool, unregisterToolsByPrefix } from '../tools/registry.js';
 import { readRawSettings } from '../config/settings-io.js';
+import { logMcp } from './logger.js';
 import type { ToolDefinition } from '../tools/types.js';
 import type { McpServerConfig } from '../config/types.js';
 
@@ -22,12 +23,12 @@ export async function initMcpServers(): Promise<void> {
 
   const connectPromises = entries.map(async ([serverName, rawConfig]) => {
     if (!rawConfig || typeof rawConfig !== 'object') {
-      process.stderr.write(`[mcp] Config inválida para '${serverName}': não é um objeto\n`);
+      logMcp(`[mcp] Config inválida para '${serverName}': não é um objeto`);
       return;
     }
     if (typeof rawConfig.command !== 'string' || !rawConfig.command) {
-      process.stderr.write(
-        `[mcp] Servidor '${serverName}' ignorado: transporte HTTP/SSE ainda não é suportado (sem 'command' stdio).\n`
+      logMcp(
+        `[mcp] Servidor '${serverName}' ignorado: transporte HTTP/SSE ainda não é suportado (sem 'command' stdio).`
       );
       return;
     }
@@ -55,10 +56,10 @@ export async function initMcpServers(): Promise<void> {
         registerTool(toolDef);
       }
 
-      process.stderr.write(`[mcp] Connected to '${serverName}': ${tools.length} tools\n`);
+      logMcp(`[mcp] Connected to '${serverName}': ${tools.length} tools`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[mcp] Failed to connect to '${serverName}': ${msg}\n`);
+      logMcp(`[mcp] Failed to connect to '${serverName}': ${msg}`);
       const idx = clients.indexOf(client);
       if (idx !== -1) clients.splice(idx, 1);
     }
