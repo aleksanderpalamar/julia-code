@@ -58,7 +58,7 @@ vi.mock("../src/providers/ollama.js", () => ({
 }));
 
 // Track subagent spawns
-let spawnedTasks: Array<{ task: string; model?: string }> = [];
+let spawnedTasks: Array<{ task: string; model?: string; sharedContext?: string }> = [];
 let mockTaskResults: Map<string, { status: string; result?: string; error?: string }> = new Map();
 let taskIdCounter = 0;
 
@@ -82,7 +82,7 @@ function createMockManager() {
   manager.spawnMany = vi.fn(
     async (
       _parentSessionId: string,
-      tasks: Array<string | { task: string; model?: string }>,
+      tasks: Array<string | { task: string; model?: string; sharedContext?: string }>,
       _runId: string,
     ) => {
       const ids: string[] = [];
@@ -90,7 +90,8 @@ function createMockManager() {
         const id = `task-${++taskIdCounter}`;
         const desc = typeof t === "string" ? t : t.task;
         const model = typeof t === "string" ? undefined : t.model;
-        spawnedTasks.push({ task: desc, model });
+        const sharedContext = typeof t === "string" ? undefined : t.sharedContext;
+        spawnedTasks.push({ task: desc, model, sharedContext });
         ids.push(id);
 
         // Auto-complete tasks after a tick
@@ -157,11 +158,16 @@ vi.mock("../src/context/health.js", () => ({
   getEmergencyKeepCount: () => 4,
   getToolResultCapFactor: () => 1,
 }));
-vi.mock("../src/context/compaction.js", () => ({
-  performStructuredCompaction: vi.fn(),
-  serializeCompaction: vi.fn(),
-  deserializeCompaction: vi.fn(),
-}));
+// Fase 2.1: we need the real deserializeCompaction / formatCompactionForContext
+// so `buildSharedContextSnapshot` can round-trip a stored compaction. Only the
+// LLM-heavy performStructuredCompaction is mocked out.
+vi.mock("../src/context/compaction.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/context/compaction.js")>();
+  return {
+    ...actual,
+    performStructuredCompaction: vi.fn(),
+  };
+});
 
 // --- Imports ---
 
@@ -191,6 +197,7 @@ function initTestDb(): Database.Database {
       tool_calls TEXT,
       tool_call_id TEXT,
       images TEXT,
+      model TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
@@ -812,5 +819,169 @@ describe("ACP Edge Cases", () => {
     expect(result).toBe(true);
     expect(spawnedTasks).toHaveLength(8);
     expect(mockManager.prewarm).toHaveBeenCalledWith(8);
+  });
+});
+
+// Fase 2.1: the orchestrator builds a read-only snapshot from the parent
+// session's latest structured compaction and passes it through every
+// subagent descriptor. Subagents must all receive the same snapshot string
+// (immutable) — no sharing back into the parent.
+describe("ACP SharedContext (Fase 2.1)", () => {
+  beforeEach(() => {
+    testDb = initTestDb();
+    mockChatResponse = [];
+    capturedChatCalls = [];
+    spawnedTasks = [];
+    mockTaskResults = new Map();
+    taskIdCounter = 0;
+    mockManager = createMockManager();
+    mockAvailableModels = [];
+  });
+
+  afterEach(() => {
+    if (testDb) testDb.close();
+  });
+
+  function seedCompaction(sessionId: string, compaction: {
+    taskGoal?: string;
+    filesRead?: string[];
+    filesModified?: string[];
+    decisions?: string[];
+    currentState?: string;
+    pendingWork?: string;
+    keyFacts?: string[];
+    rawSummary?: string;
+  }) {
+    const full = {
+      taskGoal: compaction.taskGoal ?? "",
+      filesRead: compaction.filesRead ?? [],
+      filesModified: compaction.filesModified ?? [],
+      decisions: compaction.decisions ?? [],
+      currentState: compaction.currentState ?? "",
+      pendingWork: compaction.pendingWork ?? "",
+      keyFacts: compaction.keyFacts ?? [],
+      rawSummary: compaction.rawSummary ?? "",
+    };
+    testDb
+      .prepare(
+        "INSERT INTO compactions (session_id, summary, messages_start, messages_end, format) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(sessionId, JSON.stringify(full), 0, 0, "structured");
+  }
+
+  it("spawns subagents with sharedContext=undefined when the parent has no compaction", async () => {
+    const session = createSession();
+
+    mockChatResponse = [
+      {
+        type: "text",
+        text: JSON.stringify({
+          complex: true,
+          subtasks: [
+            { task: "task A", model: null },
+            { task: "task B", model: null },
+          ],
+        }),
+      },
+      { type: "done" },
+    ];
+
+    const agent = new AgentLoop();
+    await (agent as any).maybeOrchestrate(
+      session.id,
+      COMPLEX_PROMPT,
+      "test-model",
+    );
+
+    expect(spawnedTasks).toHaveLength(2);
+    expect(spawnedTasks[0].sharedContext).toBeUndefined();
+    expect(spawnedTasks[1].sharedContext).toBeUndefined();
+  });
+
+  it("propagates the compaction snapshot into every subagent descriptor", async () => {
+    const session = createSession();
+    seedCompaction(session.id, {
+      taskGoal: "refatorar módulo de autenticação",
+      filesModified: ["src/auth/login.ts", "src/auth/session.ts"],
+      decisions: ["usar JWT com TTL de 15 minutos"],
+      currentState: "login.ts convertido, faltam testes",
+      pendingWork: "escrever testes de integração",
+    });
+
+    mockChatResponse = [
+      {
+        type: "text",
+        text: JSON.stringify({
+          complex: true,
+          subtasks: [
+            { task: "subtarefa 1", model: null },
+            { task: "subtarefa 2", model: null },
+            { task: "subtarefa 3", model: null },
+          ],
+        }),
+      },
+      { type: "done" },
+    ];
+
+    const agent = new AgentLoop();
+    await (agent as any).maybeOrchestrate(
+      session.id,
+      COMPLEX_PROMPT,
+      "test-model",
+    );
+
+    expect(spawnedTasks).toHaveLength(3);
+    const snapshots = spawnedTasks.map(t => t.sharedContext);
+    for (const s of snapshots) {
+      expect(s).toBeDefined();
+      expect(s).toContain("refatorar módulo de autenticação");
+      expect(s).toContain("src/auth/login.ts");
+      expect(s).toContain("usar JWT com TTL de 15 minutos");
+    }
+    // All subagents receive the exact same snapshot string.
+    expect(snapshots[0]).toBe(snapshots[1]);
+    expect(snapshots[1]).toBe(snapshots[2]);
+  });
+
+  it("trims filesRead / filesModified to the 10 most recent entries", async () => {
+    const session = createSession();
+    const manyRead = Array.from({ length: 20 }, (_, i) => `src/read-${i}.ts`);
+    const manyMod = Array.from({ length: 20 }, (_, i) => `src/mod-${i}.ts`);
+    seedCompaction(session.id, {
+      taskGoal: "long session",
+      filesRead: manyRead,
+      filesModified: manyMod,
+    });
+
+    mockChatResponse = [
+      {
+        type: "text",
+        text: JSON.stringify({
+          complex: true,
+          subtasks: [
+            { task: "s1", model: null },
+            { task: "s2", model: null },
+          ],
+        }),
+      },
+      { type: "done" },
+    ];
+
+    const agent = new AgentLoop();
+    await (agent as any).maybeOrchestrate(
+      session.id,
+      COMPLEX_PROMPT,
+      "test-model",
+    );
+
+    const snapshot = spawnedTasks[0].sharedContext!;
+    expect(snapshot).toBeDefined();
+    // Oldest entries (indexes 0-9) must be dropped; latest 10 remain.
+    expect(snapshot).not.toContain("src/read-0.ts");
+    expect(snapshot).not.toContain("src/mod-0.ts");
+    expect(snapshot).toContain("src/read-19.ts");
+    expect(snapshot).toContain("src/mod-19.ts");
+    expect(snapshot).toContain("src/read-10.ts");
+    expect(snapshot).toContain("src/mod-10.ts");
   });
 });

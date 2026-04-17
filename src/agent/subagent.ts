@@ -15,6 +15,12 @@ export interface SubagentTask {
   parentSessionId: string;
   sessionId: string;
   task: string;
+  /**
+   * Fase 2.1: read-only snapshot of the parent session's compacted context,
+   * captured at spawn time. Prepended to the task string before the subagent
+   * sees it. Immutable — subagents cannot update this back into the parent.
+   */
+  sharedContext?: string;
   model?: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   result?: string;
@@ -63,7 +69,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     return createSession(label).id;
   }
 
-  async spawn(parentSessionId: string, taskDescription: string | unknown, runId: string, model?: string): Promise<string> {
+  async spawn(
+    parentSessionId: string,
+    taskDescription: string | unknown,
+    runId: string,
+    model?: string,
+    sharedContext?: string,
+  ): Promise<string> {
     const config = getConfig();
     const taskId = randomUUID();
     const desc = String(taskDescription ?? '');
@@ -77,6 +89,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       parentSessionId,
       sessionId,
       task: desc,
+      sharedContext,
       model: resolvedModel,
       status: 'queued',
       createdAt: new Date(),
@@ -100,16 +113,23 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
   async spawnMany(
     parentSessionId: string,
-    tasks: Array<string | { task: string; model?: string }>,
+    tasks: Array<string | { task: string; model?: string; sharedContext?: string }>,
     runId: string,
     model?: string,
+    sharedContext?: string,
   ): Promise<string[]> {
     return Promise.all(
       tasks.map(t => {
         if (typeof t === 'string') {
-          return this.spawn(parentSessionId, t, runId, model);
+          return this.spawn(parentSessionId, t, runId, model, sharedContext);
         }
-        return this.spawn(parentSessionId, t.task, runId, t.model ?? model);
+        return this.spawn(
+          parentSessionId,
+          t.task,
+          runId,
+          t.model ?? model,
+          t.sharedContext ?? sharedContext,
+        );
       })
     );
   }
@@ -287,9 +307,16 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       this.drainQueue();
     });
 
+    // Fase 2.1: prepend the parent-session snapshot (read-only) before the
+    // task. Delimited by explicit tags so the model can recognise it as
+    // background context, not new instructions.
+    const enrichedTask = task.sharedContext
+      ? `<parent_context>\n${task.sharedContext}\n</parent_context>\n\n${task.task}`
+      : task.task;
+
     // Run agent inside AsyncLocalStorage so all tools see the worktree path
     toolContextStorage.run(toolContext, () => {
-      agent.run(task.sessionId, task.task, model).catch((err) => {
+      agent.run(task.sessionId, enrichedTask, model).catch((err) => {
         if (task.status === 'completed' || task.status === 'failed') return;
 
         if (worktree) {

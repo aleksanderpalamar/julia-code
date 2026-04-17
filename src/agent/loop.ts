@@ -7,7 +7,7 @@ import { buildContext, getCompactableMessages, getEmergencyCompactableMessages }
 import { addMessage, removeLastAssistantMessage, saveCompaction, getLatestCompaction, addSessionTokens, getSession, updateSessionTitle, getMessageCount, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
-import { performStructuredCompaction, serializeCompaction, deserializeCompaction, type StructuredCompaction } from '../context/compaction.js';
+import { performStructuredCompaction, serializeCompaction, deserializeCompaction, formatCompactionForContext, type StructuredCompaction } from '../context/compaction.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
 import { supportsTools } from '../context/model-info.js';
 import { setCurrentSessionId } from '../tools/memory.js';
@@ -496,9 +496,16 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       manager.prewarm(analysis.subtasks.length);
 
+      // Fase 2.1: build a read-only snapshot of the parent session's compacted
+      // context. Capped at ~500 tokens per subagent — the same snapshot is
+      // reused across all spawned subagents, so cost scales linearly with the
+      // number of subtasks.
+      const sharedContext = this.buildSharedContextSnapshot(sessionId);
+
       const subtaskDescriptors = analysis.subtasks.map(sub => ({
         task: sub.task,
         model: (sub.model && sub.model !== 'null') ? sub.model : undefined,
+        sharedContext,
       }));
 
       const taskLabels = new Map<string, string>();
@@ -697,6 +704,35 @@ Each subtask description must be self-contained with ALL context needed (file pa
     } catch (err) {
       return false;
     }
+  }
+
+  /**
+   * Fase 2.1: Build a read-only snapshot of the parent session's structured
+   * compaction for subagents. Returns undefined when there is no compaction
+   * or when the formatted snapshot would be empty.
+   *
+   * The snapshot is capped at ~500 tokens (via formatCompactionForContext's
+   * greedy budget) and further trims the file lists to the 10 most recent
+   * entries each. Subagents consume this as a prefix before the task itself.
+   */
+  private buildSharedContextSnapshot(sessionId: string): string | undefined {
+    const row = getLatestCompaction(sessionId);
+    if (!row) return undefined;
+
+    const compaction = deserializeCompaction(row.summary, row.format);
+
+    // Cap file lists — the parent may have accumulated dozens of entries
+    // over a long session; a subagent only needs the most recent ones for
+    // orientation. Keep the latest 10 by list order (append order in the
+    // compaction reflects discovery order).
+    const trimmed: StructuredCompaction = {
+      ...compaction,
+      filesRead: compaction.filesRead.slice(-10),
+      filesModified: compaction.filesModified.slice(-10),
+    };
+
+    const formatted = formatCompactionForContext(trimmed, 500);
+    return formatted.trim() || undefined;
   }
 
   private async maybeGenerateTitle(sessionId: string, model: string, userMessage: string, assistantReply: string): Promise<void> {
