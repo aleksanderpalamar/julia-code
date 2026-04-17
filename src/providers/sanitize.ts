@@ -12,10 +12,6 @@ export function stripTemplateLeakage(text: string): string {
   return out;
 }
 
-// Streaming-aware variant: cross-chunk delimiters (e.g. "<|tur" arrives,
-// then "n|>" in the next chunk) are held back until the next push/flush.
-// Holdback is capped so a malformed stream cannot grow the buffer without
-// bound.
 function findFirstUnmatchedOpen(s: string, open: string, close: string): number {
   const opens: number[] = [];
   let i = 0;
