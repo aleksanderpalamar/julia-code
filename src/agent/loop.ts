@@ -18,6 +18,7 @@ import { wrapToolResult } from '../security/boundaries.js';
 import { sanitizeToolResult } from '../security/sanitize.js';
 import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
 import { log } from '../observability/logger.js';
+import { analyzeComplexity } from './complexity.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -350,6 +351,22 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   private async maybeOrchestrate(sessionId: string, userMessage: string, model: string): Promise<boolean> {
     const plannerStart = Date.now();
     const taskPreview = userMessage.slice(0, 120).replace(/\n/g, ' ');
+
+    // Fase 1: heurística determinística. Se não parece complexa, pula o LLM
+    // e cai direto no loop do agente pai — economiza um round-trip.
+    const heuristic = analyzeComplexity(userMessage);
+    if (!heuristic.complex) {
+      log.plannerDecision({
+        sessionId,
+        complex: false,
+        subtaskCount: 0,
+        via: 'heuristic',
+        durationMs: Date.now() - plannerStart,
+        taskPreview,
+      });
+      return false;
+    }
+
     try {
       const provider = getProvider('ollama');
       const availableModels = await listOllamaModels();
@@ -361,13 +378,13 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       const messages: ChatMessage[] = [
         {
           role: 'system',
-          content: `You are a task complexity analyzer. Given a user task, decide if it should be split into independent subtasks that can run in parallel.
+          content: `You are a task decomposer. The user task has already been flagged as likely complex by a heuristic — your job is to split it into 2+ independent subtasks that can run in parallel.
 
 Rules:
-- Only split if the task has 2+ CLEARLY INDEPENDENT parts that don't depend on each other
-- Simple tasks (questions, single file edits, explanations, quick fixes) → NOT complex
-- Tasks with sequential dependencies → NOT complex
-- Large refactors, multi-file creation, testing multiple modules, batch operations → complex
+- Only split into subtasks that are CLEARLY INDEPENDENT (no sequential dependencies between them).
+- If, after inspection, the task is actually simple or sequential, return {"complex": false} — this overrides the heuristic.
+- If you can only think of 1 subtask, return {"complex": false} (the parent loop will handle it).
+- Prefer 2–6 subtasks. Avoid splitting into more parts than are actually independent.
 
 ${modelsInfo}
 
@@ -380,7 +397,7 @@ You can assign different models to subtasks based on their nature:
 Respond with ONLY valid JSON, no markdown, no explanation:
 {"complex": false}
 
-OR if complex:
+OR if decomposable:
 {"complex": true, "subtasks": [{"task": "detailed description of subtask 1", "model": "model-name or null"}, ...]}
 
 Each subtask description must be self-contained with ALL context needed (file paths, requirements, style). The subagent will NOT see the original conversation.`,

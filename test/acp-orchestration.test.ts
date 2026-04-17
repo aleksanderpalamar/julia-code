@@ -249,6 +249,13 @@ function initTestDb(): Database.Database {
 
 // --- Tests ---
 
+// Fase 1: the deterministic heuristic now short-circuits `maybeOrchestrate`
+// before the LLM is called. Tests that need the LLM path must provide a
+// prompt the heuristic classifies as complex. A numbered list of 3+ items
+// triggers the `numbered_list_3+` signal regardless of total length.
+const COMPLEX_PROMPT =
+  "preciso fazer três tarefas independentes:\n1. primeira tarefa\n2. segunda tarefa\n3. terceira tarefa";
+
 describe("ACP Complexity Detection", () => {
   beforeEach(() => {
     testDb = initTestDb();
@@ -286,7 +293,7 @@ describe("ACP Complexity Detection", () => {
     const agent = new AgentLoop();
     const result = await (agent as any).maybeOrchestrate(
       session.id,
-      "create a REST server with 3 endpoints",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
@@ -333,7 +340,7 @@ describe("ACP Complexity Detection", () => {
     const agent = new AgentLoop();
     await (agent as any).maybeOrchestrate(
       session.id,
-      "create a REST API with GET, POST and PUT for products",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
@@ -397,7 +404,7 @@ describe("ACP Complexity Detection", () => {
     const agent = new AgentLoop();
     const result = await (agent as any).maybeOrchestrate(
       session.id,
-      "create a full-stack app with database and API",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
@@ -453,7 +460,7 @@ describe("ACP Complexity Detection", () => {
     const agent = new AgentLoop();
     await (agent as any).maybeOrchestrate(
       session.id,
-      "build a chat application",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
@@ -466,9 +473,10 @@ describe("ACP Complexity Detection", () => {
     }>;
     expect(messages).toHaveLength(2);
     expect(messages[0].role).toBe("system");
-    expect(messages[0].content).toContain("task complexity analyzer");
+    // Fase 1: prompt agora foca em decomposição (heurística já decidiu complexidade)
+    expect(messages[0].content).toContain("task decomposer");
     expect(messages[1].role).toBe("user");
-    expect(messages[1].content).toBe("build a chat application");
+    expect(messages[1].content).toBe(COMPLEX_PROMPT);
   });
 });
 
@@ -506,7 +514,7 @@ describe("ACP Model Resolution", () => {
     ];
 
     const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, "multi-model task", "test-model");
+    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
 
     expect(spawnedTasks).toHaveLength(2);
     expect(spawnedTasks[0].model).toBe("qwen3:8b");
@@ -532,7 +540,7 @@ describe("ACP Model Resolution", () => {
     ];
 
     const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, "some task", "test-model");
+    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
 
     expect(spawnedTasks).toHaveLength(2);
     // Model should be undefined (null fallback → no model override)
@@ -559,7 +567,7 @@ describe("ACP Model Resolution", () => {
     ];
 
     const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, "default model task", "test-model");
+    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
 
     expect(spawnedTasks).toHaveLength(2);
     expect(spawnedTasks[0].model).toBeUndefined();
@@ -601,7 +609,7 @@ describe("ACP Orchestration Events and DB Persistence", () => {
     ];
 
     const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, "complex task", "test-model");
+    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
 
     // Verify orchestration run was saved in DB
     const runs = testDb
@@ -635,7 +643,7 @@ describe("ACP Orchestration Events and DB Persistence", () => {
 
     await (agent as any).maybeOrchestrate(
       session.id,
-      "create user and auth microservices",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
@@ -666,7 +674,7 @@ describe("ACP Orchestration Events and DB Persistence", () => {
     ];
 
     const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, "three tasks", "test-model");
+    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
 
     expect(mockManager.prewarm).toHaveBeenCalledWith(3);
     expect(mockManager.spawnMany).toHaveBeenCalledTimes(1);
@@ -732,7 +740,7 @@ describe("ACP Edge Cases", () => {
     const agent = new AgentLoop();
     const result = await (agent as any).maybeOrchestrate(
       session.id,
-      "whitespace edge case",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
@@ -797,7 +805,7 @@ describe("ACP Edge Cases", () => {
     const agent = new AgentLoop();
     const result = await (agent as any).maybeOrchestrate(
       session.id,
-      "migrate all 8 files from CommonJS to ESM modules",
+      COMPLEX_PROMPT,
       "test-model",
     );
 
