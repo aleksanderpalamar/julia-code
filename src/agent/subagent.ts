@@ -7,6 +7,7 @@ import { getProjectDir } from '../config/workspace.js';
 import { createWorktree, removeWorktree, mergeWorktree, isGitRepo, type Worktree } from './worktree.js';
 import { toolContextStorage } from '../tools/registry.js';
 import type { ToolContext } from '../tools/types.js';
+import { log } from '../observability/logger.js';
 
 export interface SubagentTask {
   id: string;
@@ -166,6 +167,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
     updateSubagentRunStatus(task.id, 'running', { startedAt: task.startedAt.toISOString() });
 
+    log.subagentSpawn({
+      runId: task.runId,
+      taskId: task.id,
+      model,
+      taskPreview: label,
+    });
+
     this.emit('task:started', task.id, label);
 
     const config = getConfig();
@@ -238,6 +246,12 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         durationMs: task.durationMs,
         result: task.result,
       });
+      log.subagentDone({
+        runId: task.runId,
+        taskId: task.id,
+        status: 'completed',
+        durationMs: task.durationMs,
+      });
       this.agents.delete(task.id);
       this.running--;
       this.emit('task:completed', task.id, result);
@@ -259,6 +273,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         completedAt: task.completedAt.toISOString(),
         durationMs: task.durationMs,
         error: task.error,
+      });
+      log.subagentDone({
+        runId: task.runId,
+        taskId: task.id,
+        status: 'failed',
+        durationMs: task.durationMs,
+        error,
       });
       this.agents.delete(task.id);
       this.running--;
@@ -284,6 +305,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
           completedAt: task.completedAt.toISOString(),
           durationMs: task.durationMs,
           error: task.error,
+        });
+        log.subagentDone({
+          runId: task.runId,
+          taskId: task.id,
+          status: 'failed',
+          durationMs: task.durationMs,
+          error: errorMsg,
         });
         this.agents.delete(task.id);
         this.running--;
@@ -315,6 +343,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
     updateSubagentRunStatus(task.id, 'failed', {
       completedAt: task.completedAt.toISOString(),
+      durationMs: task.durationMs,
+      error: 'Cancelled',
+    });
+    log.subagentDone({
+      runId: task.runId,
+      taskId: task.id,
+      status: 'failed',
       durationMs: task.durationMs,
       error: 'Cancelled',
     });

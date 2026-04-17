@@ -524,6 +524,7 @@ describe("ACP Model Resolution", () => {
           complex: true,
           subtasks: [
             { task: "Task with unknown model", model: "gpt-4o" },
+            { task: "Other task with unknown model", model: "gemini-flash" },
           ],
         }),
       },
@@ -533,9 +534,10 @@ describe("ACP Model Resolution", () => {
     const agent = new AgentLoop();
     await (agent as any).maybeOrchestrate(session.id, "some task", "test-model");
 
-    expect(spawnedTasks).toHaveLength(1);
+    expect(spawnedTasks).toHaveLength(2);
     // Model should be undefined (null fallback → no model override)
     expect(spawnedTasks[0].model).toBeUndefined();
+    expect(spawnedTasks[1].model).toBeUndefined();
   });
 
   it("should use null model when subtask model is 'null' string", async () => {
@@ -548,7 +550,8 @@ describe("ACP Model Resolution", () => {
         text: JSON.stringify({
           complex: true,
           subtasks: [
-            { task: "Default model task", model: "null" },
+            { task: "Default model task A", model: "null" },
+            { task: "Default model task B", model: "null" },
           ],
         }),
       },
@@ -558,8 +561,9 @@ describe("ACP Model Resolution", () => {
     const agent = new AgentLoop();
     await (agent as any).maybeOrchestrate(session.id, "default model task", "test-model");
 
-    expect(spawnedTasks).toHaveLength(1);
+    expect(spawnedTasks).toHaveLength(2);
     expect(spawnedTasks[0].model).toBeUndefined();
+    expect(spawnedTasks[1].model).toBeUndefined();
   });
 });
 
@@ -685,7 +689,7 @@ describe("ACP Edge Cases", () => {
     if (testDb) testDb.close();
   });
 
-  it("should handle single subtask — still orchestrates", async () => {
+  it("should NOT orchestrate with a single subtask (Fase 2.2: falls back to parent loop)", async () => {
     const session = createSession();
 
     mockChatResponse = [
@@ -706,9 +710,10 @@ describe("ACP Edge Cases", () => {
       "test-model",
     );
 
-    // Even with 1 subtask, if model says complex, we orchestrate
-    expect(result).toBe(true);
-    expect(spawnedTasks).toHaveLength(1);
+    // Fase 2.2: with a single subtask we short-circuit to keep execution
+    // in the parent loop (avoids the subagent spawn overhead).
+    expect(result).toBe(false);
+    expect(spawnedTasks).toHaveLength(0);
   });
 
   it("should handle LLM response with extra whitespace", async () => {
@@ -718,7 +723,7 @@ describe("ACP Edge Cases", () => {
       { type: "text", text: "\n\n  " },
       {
         type: "text",
-        text: '{"complex": true, "subtasks": [{"task": "Clean task", "model": null}]}',
+        text: '{"complex": true, "subtasks": [{"task": "Clean task A", "model": null}, {"task": "Clean task B", "model": null}]}',
       },
       { type: "text", text: "   \n" },
       { type: "done" },
@@ -732,7 +737,7 @@ describe("ACP Edge Cases", () => {
     );
 
     expect(result).toBe(true);
-    expect(spawnedTasks).toHaveLength(1);
+    expect(spawnedTasks).toHaveLength(2);
   });
 
   it("should not orchestrate for greeting messages", async () => {

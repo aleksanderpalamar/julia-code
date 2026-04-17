@@ -17,6 +17,7 @@ import { listOllamaModels } from '../providers/ollama.js';
 import { wrapToolResult } from '../security/boundaries.js';
 import { sanitizeToolResult } from '../security/sanitize.js';
 import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
+import { log } from '../observability/logger.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -118,6 +119,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       toolSchemas = toolSchemas.filter(s => !this.options.excludeTools!.includes(s.function.name));
     }
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
+    let iterations = 0;
 
     try {
       addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
@@ -134,7 +136,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       await this.maybeCompact(sessionId, auxModel);
 
-      let iterations = 0;
       let currentBudget: ContextBudget | null = null;
       const hasToolModel = loopModel !== auxModel;
       let switchedToCloud = false;
@@ -145,6 +146,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       while (iterations < maxIterations) {
         if (this.abortController?.signal.aborted) {
+          log.loopEnd({ sessionId, iterations, reason: 'aborted' });
           this.emit('error', 'Aborted');
           this.running = false;
           return;
@@ -211,9 +213,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             case 'error':
               if (lastHadToolCalls && retryCount < 1) {
                 retryCount++;
+                log.retry({ sessionId, iteration: iterations, kind: 'stream' });
                 this.emit('clear_streaming');
                 fullText = '__RETRY__';
               } else {
+                log.loopEnd({ sessionId, iterations, reason: 'error' });
                 this.emit('error', chunk.error!);
                 this.emit('done', '');
                 this.running = false;
@@ -238,12 +242,14 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         if (fullText === '' && toolCalls.length === 0 && lastHadToolCalls && retryCount < 1) {
           retryCount++;
+          log.retry({ sessionId, iteration: iterations, kind: 'empty' });
           continue;
         }
 
         addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined, undefined, undefined, currentModel);
 
         if (toolCalls.length === 0) {
+          log.loopEnd({ sessionId, iterations, reason: 'done' });
           this.emit('done', fullText);
           this.maybeGenerateTitle(sessionId, auxModel, userMessage, fullText);
           this.running = false;
@@ -254,6 +260,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         for (const tc of toolCalls) {
           if (this.abortController?.signal.aborted) {
+            log.loopEnd({ sessionId, iterations, reason: 'aborted' });
             this.emit('error', 'Aborted');
             this.running = false;
             return;
@@ -284,7 +291,15 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             }
           }
 
+          const toolStart = Date.now();
           const result = await executeTool(toolName, toolArgs);
+          log.toolCall({
+            sessionId,
+            iteration: iterations,
+            name: toolName,
+            success: result.success,
+            durationMs: Date.now() - toolStart,
+          });
           let resultText = result.success
             ? result.output
             : `Error: ${result.error}\n${result.output}`;
@@ -308,9 +323,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         lastHadToolCalls = true;
       }
 
+      log.loopEnd({ sessionId, iterations, reason: 'max_iterations' });
       addMessage(sessionId, 'assistant', '[Max tool iterations reached]', undefined, undefined, undefined, auxModel);
       this.emit('done', '[Max tool iterations reached]');
     } catch (err) {
+      log.loopEnd({ sessionId, iterations, reason: 'error' });
       this.emit('error', err instanceof Error ? err.message : String(err));
     } finally {
       this.running = false;
@@ -331,6 +348,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   }
 
   private async maybeOrchestrate(sessionId: string, userMessage: string, model: string): Promise<boolean> {
+    const plannerStart = Date.now();
+    const taskPreview = userMessage.slice(0, 120).replace(/\n/g, ' ');
     try {
       const provider = getProvider('ollama');
       const availableModels = await listOllamaModels();
@@ -390,9 +409,39 @@ Each subtask description must be self-contained with ALL context needed (file pa
       try {
         analysis = JSON.parse(response);
       } catch {
-        return false;       }
+        log.plannerDecision({
+          sessionId,
+          complex: false,
+          subtaskCount: 0,
+          via: 'llm',
+          durationMs: Date.now() - plannerStart,
+          taskPreview,
+        });
+        return false;
+      }
 
       if (!analysis.complex || !analysis.subtasks?.length) {
+        log.plannerDecision({
+          sessionId,
+          complex: false,
+          subtaskCount: analysis.subtasks?.length ?? 0,
+          via: 'llm',
+          durationMs: Date.now() - plannerStart,
+          taskPreview,
+        });
+        return false;
+      }
+
+      // Fase 2.2: 1 subtarefa não precisa de subagente — cai no loop normal do agente pai.
+      if (analysis.subtasks.length === 1) {
+        log.plannerDecision({
+          sessionId,
+          complex: false,
+          subtaskCount: 1,
+          via: 'llm',
+          durationMs: Date.now() - plannerStart,
+          taskPreview,
+        });
         return false;
       }
 
@@ -415,6 +464,14 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const orchestrationStart = Date.now();
 
       createOrchestrationRun(runId, sessionId, userMessage, analysis.subtasks.length);
+      log.plannerDecision({
+        sessionId,
+        complex: true,
+        subtaskCount: analysis.subtasks.length,
+        via: 'llm',
+        durationMs: Date.now() - plannerStart,
+        taskPreview,
+      });
 
       this.emit('chunk', `🔀 Tarefa complexa detectada — spawnando ${analysis.subtasks.length} subagentes... (run: ${runId.slice(0, 8)})\n\n`);
 
