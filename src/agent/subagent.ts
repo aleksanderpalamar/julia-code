@@ -39,15 +39,37 @@ type QueuedItem = {
   model?: string;
 };
 
-class SubagentManager extends EventEmitter<SubagentEvents> {
+export class SubagentManager extends EventEmitter<SubagentEvents> {
   private tasks = new Map<string, SubagentTask>();
   private agents = new Map<string, AgentLoop>();
   private running = 0;
-  private queue: QueuedItem[] = [];
+  private runningByModel = new Map<string, number>();
+  private queuesByModel = new Map<string, QueuedItem[]>();
   private sessionPool: string[] = [];
 
   constructor() {
     super();
+  }
+
+  private getModelLimit(model: string): number {
+    const limits = getConfig().acpModelLimits ?? {};
+    return limits[model] ?? Infinity;
+  }
+
+  private canRunModel(model: string): boolean {
+    if (this.running >= getConfig().acpMaxConcurrent) return false;
+    const used = this.runningByModel.get(model) ?? 0;
+    return used < this.getModelLimit(model);
+  }
+
+  private incrementModel(model: string): void {
+    this.runningByModel.set(model, (this.runningByModel.get(model) ?? 0) + 1);
+  }
+
+  private decrementModel(model: string): void {
+    const curr = this.runningByModel.get(model) ?? 0;
+    if (curr <= 1) this.runningByModel.delete(model);
+    else this.runningByModel.set(model, curr - 1);
   }
 
   prewarm(count: number): void {
@@ -96,11 +118,12 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
     this.emit('task:queued', taskId, preview);
 
-    const maxConcurrent = config.acpMaxConcurrent;
-    if (this.running < maxConcurrent) {
+    if (this.canRunModel(resolvedModel)) {
       this.runTask(task, resolvedModel);
     } else {
-      this.queue.push({ task, model: resolvedModel });
+      const q = this.queuesByModel.get(resolvedModel) ?? [];
+      q.push({ task, model: resolvedModel });
+      this.queuesByModel.set(resolvedModel, q);
     }
 
     return taskId;
@@ -176,9 +199,11 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
   private runTask(task: SubagentTask, model?: string): void {
     const label = task.task.slice(0, 60).replace(/\n/g, ' ');
+    const modelKey = model ?? task.model ?? '__unknown__';
     task.status = 'running';
     task.startedAt = new Date();
     this.running++;
+    this.incrementModel(modelKey);
 
     updateSubagentRunStatus(task.id, 'running', { startedAt: task.startedAt.toISOString() });
 
@@ -268,6 +293,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       });
       this.agents.delete(task.id);
       this.running--;
+      this.decrementModel(modelKey);
       this.emit('task:completed', task.id, result);
       this.drainQueue();
     });
@@ -297,6 +323,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       });
       this.agents.delete(task.id);
       this.running--;
+      this.decrementModel(modelKey);
       this.emit('task:failed', task.id, error);
       this.drainQueue();
     });
@@ -332,6 +359,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         });
         this.agents.delete(task.id);
         this.running--;
+        this.decrementModel(modelKey);
         this.emit('task:failed', task.id, errorMsg);
         this.drainQueue();
       });
@@ -342,16 +370,22 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     const task = this.tasks.get(taskId);
     if (!task || task.status === 'completed' || task.status === 'failed') return false;
 
+    const modelKey = task.model ?? '__unknown__';
     const agent = this.agents.get(taskId);
     if (agent) {
       agent.abort();
       this.agents.delete(taskId);
       this.running--;
+      this.decrementModel(modelKey);
     }
 
-    const queueIdx = this.queue.findIndex(item => item.task.id === taskId);
-    if (queueIdx >= 0) {
-      this.queue.splice(queueIdx, 1);
+    for (const [k, q] of this.queuesByModel) {
+      const idx = q.findIndex(item => item.task.id === taskId);
+      if (idx >= 0) {
+        q.splice(idx, 1);
+        if (q.length === 0) this.queuesByModel.delete(k);
+        break;
+      }
     }
 
     task.status = 'failed';
@@ -386,10 +420,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
   }
 
   private drainQueue(): void {
-    const maxConcurrent = getConfig().acpMaxConcurrent;
-    while (this.running < maxConcurrent && this.queue.length > 0) {
-      const item = this.queue.shift()!;
-      this.runTask(item.task, item.model);
+    for (const [model, queue] of this.queuesByModel) {
+      while (queue.length > 0 && this.canRunModel(model)) {
+        const item = queue.shift()!;
+        this.runTask(item.task, item.model);
+      }
+      if (queue.length === 0) this.queuesByModel.delete(model);
+      if (this.running >= getConfig().acpMaxConcurrent) break;
     }
   }
 }

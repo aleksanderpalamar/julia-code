@@ -15,6 +15,7 @@ export const ConfigSchema = z.object({
   acpDefaultModel: z.string().nullable().default(null),
   acpCancelOnFailure: z.boolean().default(false),
   acpWorktreeIsolation: z.boolean().default(true),
+  acpModelLimits: z.record(z.number()).default({}),
   toolModel: z.string().nullable().default(null),
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   contextReservePercent: z.number().default(0.15),
@@ -71,6 +72,7 @@ export const SettingsSchema = z.object({
     defaultModel: z.string().nullable().default(null),
     cancelOnFailure: z.boolean().default(false),
     worktreeIsolation: z.boolean().default(true),
+    modelLimits: z.record(z.number()).optional(),
   }).optional(),
   temperament: z.object({
     default: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
