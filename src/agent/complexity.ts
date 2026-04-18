@@ -13,28 +13,16 @@ export interface ComplexityResult {
   signals: ComplexitySignal;
 }
 
-// Action verbs in imperative form, PT + EN. Used to detect multi-verb tasks.
 const ACTION_VERBS_RE =
   /\b(crie|cria|criar|escreva|escrever|escreve|implemente|implementar|implementa|refatore|refatorar|refatora|teste|testar|analise|analisar|compare|comparar|divida|dividir|separe|separar|remova|remover|create|write|implement|refactor|test|analyze|compare|split|separate|remove|delete|migrate|migre|migrar|convert|converta|converter)\b/gi;
 
-// Parallel/batch intent keywords. Strong hint that user wants many things done.
 const BATCH_KEYWORDS_RE =
   /\b(todos|todas|cada|vários|várias|varios|varias|all|each|every|multiple|batch|em paralelo|in parallel)\b/i;
 
-// Coordinating conjunctions. Counted to estimate "number of clauses".
-// Word-boundaries are critical in PT — "e" appears inside many words.
 const CONJUNCTIONS_RE = /\b(e|and|then|depois|além disso|also)\b/gi;
 
-// Numbered list items — either multi-line ("1. foo\n2. bar\n3. baz") or
-// inline ("1. foo, 2. bar e 3. baz"). We require the digit to be preceded
-// by start-of-string or a non-word separator (whitespace, comma, semicolon,
-// colon, period, paren). This avoids matching identifiers like "v1." while
-// still catching the common TUI single-line form where users list items
-// separated by commas or the word "e"/"and".
 const NUMBERED_ITEM_RE = /(?:^|[\s,;:.()])\s*\d+[.)]\s+\S/g;
 
-// Bullet list items are almost always multi-line — inline bullets are rare
-// and ambiguous with the minus sign. Keep this strict (start-of-line only).
 const BULLET_ITEM_RE = /(?:^|\n)\s*[-*]\s+\S/g;
 
 function countMatches(text: string, re: RegExp): number {
@@ -61,8 +49,6 @@ export function analyzeComplexity(userMessage: string): ComplexityResult {
     hasBatchKeyword,
   };
 
-  // Structural signals win regardless of length — an explicit list of 3+
-  // items is the user already signaling parallelism.
   if (numberedItems >= 3) {
     signals.reason = 'numbered_list_3+';
     return { complex: true, signals };

@@ -15,11 +15,6 @@ export interface SubagentTask {
   parentSessionId: string;
   sessionId: string;
   task: string;
-  /**
-   * Fase 2.1: read-only snapshot of the parent session's compacted context,
-   * captured at spawn time. Prepended to the task string before the subagent
-   * sees it. Immutable — subagents cannot update this back into the parent.
-   */
   sharedContext?: string;
   model?: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
@@ -199,11 +194,10 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     const config = getConfig();
     const agent = new AgentLoop({
       maxIterations: config.acpSubagentMaxIterations,
-      excludeTools: ['subagent'], // Prevent recursive subagent spawning
+      excludeTools: ['subagent'],
     });
     this.agents.set(task.id, agent);
 
-    // Create worktree for filesystem isolation if enabled
     let worktree: Worktree | null = null;
     let toolContext: ToolContext;
 
@@ -307,14 +301,10 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       this.drainQueue();
     });
 
-    // Fase 2.1: prepend the parent-session snapshot (read-only) before the
-    // task. Delimited by explicit tags so the model can recognise it as
-    // background context, not new instructions.
     const enrichedTask = task.sharedContext
       ? `<parent_context>\n${task.sharedContext}\n</parent_context>\n\n${task.task}`
       : task.task;
 
-    // Run agent inside AsyncLocalStorage so all tools see the worktree path
     toolContextStorage.run(toolContext, () => {
       agent.run(task.sessionId, enrichedTask, model).catch((err) => {
         if (task.status === 'completed' || task.status === 'failed') return;

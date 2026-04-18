@@ -52,17 +52,10 @@ export class StreamingTemplateStripper {
     return out;
   }
 
-  // Returns an index up to which it is safe to emit. Holds back:
-  //  (a) any unclosed paired block start — <|..., <think>..., <functions.X>...
-  //      whose matching close has not arrived yet;
-  //  (b) any trailing partial prefix of an open marker (e.g. "<thi").
-  // Holdback is capped at MAX_HOLDBACK so a malformed stream cannot grow
-  // the buffer without bound.
   private safeCutPoint(s: string): number {
     const minCut = Math.max(0, s.length - StreamingTemplateStripper.MAX_HOLDBACK);
     let cut = s.length;
 
-    // Fixed-string pairs.
     const fixedPairs: Array<[string, string]> = [
       ['<|', '|>'],
       ['<think>', '</think>'],
@@ -72,7 +65,6 @@ export class StreamingTemplateStripper {
       if (unmatched >= 0) cut = Math.min(cut, unmatched);
     }
 
-    // Variable-name pair: <functions.X>...</functions.X>.
     const fOpens = Array.from(s.matchAll(/<functions\.[^>\s]{1,40}>/g)).map(m => m.index!);
     const fCloses = Array.from(s.matchAll(/<\/functions\.[^>\s]{1,40}>/g)).map(m => m.index!);
     const matchedOpens = new Set<number>();
@@ -83,7 +75,6 @@ export class StreamingTemplateStripper {
     const unmatchedF = fOpens.find(op => !matchedOpens.has(op));
     if (unmatchedF !== undefined) cut = Math.min(cut, unmatchedF);
 
-    // Trailing partial prefix of any open marker.
     const partials = ['<think>', '<|', '<functions.'];
     for (const p of partials) {
       for (let k = p.length - 1; k >= 1; k--) {
