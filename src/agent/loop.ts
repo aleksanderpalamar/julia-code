@@ -19,6 +19,7 @@ import { sanitizeToolResult } from '../security/sanitize.js';
 import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
 import { log } from '../observability/logger.js';
 import { analyzeComplexity } from './complexity.js';
+import { maybeDeterministicRetry } from './retry.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -301,9 +302,19 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             success: result.success,
             durationMs: Date.now() - toolStart,
           });
+
+          let errorWithHint = result.error;
+          if (!result.success && result.error) {
+            const retry = await maybeDeterministicRetry(result.error, toolArgs);
+            if (retry) {
+              log.retry({ sessionId, iteration: iterations, kind: 'deterministic' });
+              errorWithHint = result.error + retry.hint;
+            }
+          }
+
           let resultText = result.success
             ? result.output
-            : `Error: ${result.error}\n${result.output}`;
+            : `Error: ${errorWithHint}\n${result.output}`;
 
           let maxResultChars = 12000;           if (currentBudget) {
             maxResultChars = computeToolResultCap(currentBudget, toolName);
