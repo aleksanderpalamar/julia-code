@@ -38,6 +38,7 @@ import {
   addMcpServer,
   removeMcpServer,
 } from "../mcp/manager.js";
+import { getAllMetrics, formatMetricsForDisplay } from "../observability/metrics.js";
 
 interface Props {
   sessionId?: string;
@@ -89,6 +90,20 @@ export function App({ sessionId }: Props) {
       }
 
       if (text === "/clear") {
+        return;
+      }
+
+      if (text === "/stats") {
+        (async () => {
+          try {
+            const metrics = await getAllMetrics();
+            addSystemEntry(formatMetricsForDisplay(metrics));
+          } catch (err) {
+            addSystemEntry(
+              `Failed to compute stats: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        })();
         return;
       }
 

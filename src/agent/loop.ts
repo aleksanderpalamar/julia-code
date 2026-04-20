@@ -7,7 +7,7 @@ import { buildContext, getCompactableMessages, getEmergencyCompactableMessages }
 import { addMessage, removeLastAssistantMessage, saveCompaction, getLatestCompaction, addSessionTokens, getSession, updateSessionTitle, getMessageCount, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
-import { performStructuredCompaction, serializeCompaction, deserializeCompaction, type StructuredCompaction } from '../context/compaction.js';
+import { performStructuredCompaction, serializeCompaction, deserializeCompaction, formatCompactionForContext, type StructuredCompaction } from '../context/compaction.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
 import { supportsTools } from '../context/model-info.js';
 import { setCurrentSessionId } from '../tools/memory.js';
@@ -17,6 +17,10 @@ import { listOllamaModels } from '../providers/ollama.js';
 import { wrapToolResult } from '../security/boundaries.js';
 import { sanitizeToolResult } from '../security/sanitize.js';
 import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
+import { log } from '../observability/logger.js';
+import { analyzeComplexity } from './complexity.js';
+import { maybeDeterministicRetry } from './retry.js';
+import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -118,6 +122,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       toolSchemas = toolSchemas.filter(s => !this.options.excludeTools!.includes(s.function.name));
     }
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
+    let iterations = 0;
 
     try {
       addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
@@ -134,7 +139,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       await this.maybeCompact(sessionId, auxModel);
 
-      let iterations = 0;
       let currentBudget: ContextBudget | null = null;
       const hasToolModel = loopModel !== auxModel;
       let switchedToCloud = false;
@@ -145,6 +149,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       while (iterations < maxIterations) {
         if (this.abortController?.signal.aborted) {
+          log.loopEnd({ sessionId, iterations, reason: 'aborted' });
           this.emit('error', 'Aborted');
           this.running = false;
           return;
@@ -211,9 +216,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             case 'error':
               if (lastHadToolCalls && retryCount < 1) {
                 retryCount++;
+                log.retry({ sessionId, iteration: iterations, kind: 'stream' });
                 this.emit('clear_streaming');
                 fullText = '__RETRY__';
               } else {
+                log.loopEnd({ sessionId, iterations, reason: 'error' });
                 this.emit('error', chunk.error!);
                 this.emit('done', '');
                 this.running = false;
@@ -238,12 +245,14 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         if (fullText === '' && toolCalls.length === 0 && lastHadToolCalls && retryCount < 1) {
           retryCount++;
+          log.retry({ sessionId, iteration: iterations, kind: 'empty' });
           continue;
         }
 
         addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined, undefined, undefined, currentModel);
 
         if (toolCalls.length === 0) {
+          log.loopEnd({ sessionId, iterations, reason: 'done' });
           this.emit('done', fullText);
           this.maybeGenerateTitle(sessionId, auxModel, userMessage, fullText);
           this.running = false;
@@ -254,6 +263,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         for (const tc of toolCalls) {
           if (this.abortController?.signal.aborted) {
+            log.loopEnd({ sessionId, iterations, reason: 'aborted' });
             this.emit('error', 'Aborted');
             this.running = false;
             return;
@@ -284,10 +294,28 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             }
           }
 
+          const toolStart = Date.now();
           const result = await executeTool(toolName, toolArgs);
+          log.toolCall({
+            sessionId,
+            iteration: iterations,
+            name: toolName,
+            success: result.success,
+            durationMs: Date.now() - toolStart,
+          });
+
+          let errorWithHint = result.error;
+          if (!result.success && result.error) {
+            const retry = await maybeDeterministicRetry(result.error, toolArgs);
+            if (retry) {
+              log.retry({ sessionId, iteration: iterations, kind: 'deterministic' });
+              errorWithHint = result.error + retry.hint;
+            }
+          }
+
           let resultText = result.success
             ? result.output
-            : `Error: ${result.error}\n${result.output}`;
+            : `Error: ${errorWithHint}\n${result.output}`;
 
           let maxResultChars = 12000;           if (currentBudget) {
             maxResultChars = computeToolResultCap(currentBudget, toolName);
@@ -308,9 +336,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         lastHadToolCalls = true;
       }
 
+      log.loopEnd({ sessionId, iterations, reason: 'max_iterations' });
       addMessage(sessionId, 'assistant', '[Max tool iterations reached]', undefined, undefined, undefined, auxModel);
       this.emit('done', '[Max tool iterations reached]');
     } catch (err) {
+      log.loopEnd({ sessionId, iterations, reason: 'error' });
       this.emit('error', err instanceof Error ? err.message : String(err));
     } finally {
       this.running = false;
@@ -331,24 +361,52 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   }
 
   private async maybeOrchestrate(sessionId: string, userMessage: string, model: string): Promise<boolean> {
+    const plannerStart = Date.now();
+    const taskPreview = userMessage.slice(0, 120).replace(/\n/g, ' ');
+
+    // Fase 1: heurística determinística. Se não parece complexa, pula o LLM
+    // e cai direto no loop do agente pai — economiza um round-trip.
+    const heuristic = analyzeComplexity(userMessage);
+    if (!heuristic.complex) {
+      log.plannerDecision({
+        sessionId,
+        complex: false,
+        subtaskCount: 0,
+        via: 'heuristic',
+        durationMs: Date.now() - plannerStart,
+        taskPreview,
+      });
+      return false;
+    }
+
     try {
       const provider = getProvider('ollama');
       const availableModels = await listOllamaModels();
 
-      const modelsInfo = availableModels.length > 0
-        ? `Available models: ${availableModels.join(', ')}`
-        : 'No model list available — use null for model to use the default.';
+      let analysis: { complex: boolean; subtasks?: Array<{ task: string; model?: string | null }> };
+      let plannerVia: 'llm' | 'cache';
 
-      const messages: ChatMessage[] = [
-        {
-          role: 'system',
-          content: `You are a task complexity analyzer. Given a user task, decide if it should be split into independent subtasks that can run in parallel.
+      const cached = getCachedPlannerResult(sessionId, userMessage);
+      if (cached) {
+        analysis = cached;
+        plannerVia = 'cache';
+      } else {
+        plannerVia = 'llm';
+
+        const modelsInfo = availableModels.length > 0
+          ? `Available models: ${availableModels.join(', ')}`
+          : 'No model list available — use null for model to use the default.';
+
+        const messages: ChatMessage[] = [
+          {
+            role: 'system',
+            content: `You are a task decomposer. The user task has already been flagged as likely complex by a heuristic — your job is to split it into 2+ independent subtasks that can run in parallel.
 
 Rules:
-- Only split if the task has 2+ CLEARLY INDEPENDENT parts that don't depend on each other
-- Simple tasks (questions, single file edits, explanations, quick fixes) → NOT complex
-- Tasks with sequential dependencies → NOT complex
-- Large refactors, multi-file creation, testing multiple modules, batch operations → complex
+- Only split into subtasks that are CLEARLY INDEPENDENT (no sequential dependencies between them).
+- If, after inspection, the task is actually simple or sequential, return {"complex": false} — this overrides the heuristic.
+- If you can only think of 1 subtask, return {"complex": false} (the parent loop will handle it).
+- Prefer 2–6 subtasks. Avoid splitting into more parts than are actually independent.
 
 ${modelsInfo}
 
@@ -361,38 +419,69 @@ You can assign different models to subtasks based on their nature:
 Respond with ONLY valid JSON, no markdown, no explanation:
 {"complex": false}
 
-OR if complex:
+OR if decomposable:
 {"complex": true, "subtasks": [{"task": "detailed description of subtask 1", "model": "model-name or null"}, ...]}
 
 Each subtask description must be self-contained with ALL context needed (file paths, requirements, style). The subagent will NOT see the original conversation.`,
-        },
-        {
-          role: 'user',
-          content: userMessage,
-        },
-      ];
+          },
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ];
 
-      let response = '';
-      const stream = provider.chat({ model, messages });
-      for await (const chunk of stream) {
-        if (chunk.type === 'error') return false;
-        if (chunk.type === 'text' && chunk.text) {
-          response += chunk.text;
+        let response = '';
+        const stream = provider.chat({ model, messages });
+        for await (const chunk of stream) {
+          if (chunk.type === 'error') return false;
+          if (chunk.type === 'text' && chunk.text) {
+            response += chunk.text;
+          }
         }
-      }
 
-      response = response.trim();
-      if (response.startsWith('```')) {
-        response = response.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-      }
+        response = response.trim();
+        if (response.startsWith('```')) {
+          response = response.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+        }
 
-      let analysis: { complex: boolean; subtasks?: Array<{ task: string; model?: string | null }> };
-      try {
-        analysis = JSON.parse(response);
-      } catch {
-        return false;       }
+        try {
+          analysis = JSON.parse(response);
+        } catch {
+          log.plannerDecision({
+            sessionId,
+            complex: false,
+            subtaskCount: 0,
+            via: 'llm',
+            durationMs: Date.now() - plannerStart,
+            taskPreview,
+          });
+          return false;
+        }
+
+        setCachedPlannerResult(sessionId, userMessage, analysis);
+      }
 
       if (!analysis.complex || !analysis.subtasks?.length) {
+        log.plannerDecision({
+          sessionId,
+          complex: false,
+          subtaskCount: analysis.subtasks?.length ?? 0,
+          via: plannerVia,
+          durationMs: Date.now() - plannerStart,
+          taskPreview,
+        });
+        return false;
+      }
+
+      if (analysis.subtasks.length === 1) {
+        log.plannerDecision({
+          sessionId,
+          complex: false,
+          subtaskCount: 1,
+          via: plannerVia,
+          durationMs: Date.now() - plannerStart,
+          taskPreview,
+        });
         return false;
       }
 
@@ -415,6 +504,14 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const orchestrationStart = Date.now();
 
       createOrchestrationRun(runId, sessionId, userMessage, analysis.subtasks.length);
+      log.plannerDecision({
+        sessionId,
+        complex: true,
+        subtaskCount: analysis.subtasks.length,
+        via: plannerVia,
+        durationMs: Date.now() - plannerStart,
+        taskPreview,
+      });
 
       this.emit('chunk', `🔀 Tarefa complexa detectada — spawnando ${analysis.subtasks.length} subagentes... (run: ${runId.slice(0, 8)})\n\n`);
 
@@ -422,9 +519,16 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
       manager.prewarm(analysis.subtasks.length);
 
+      // Fase 2.1: build a read-only snapshot of the parent session's compacted
+      // context. Capped at ~500 tokens per subagent — the same snapshot is
+      // reused across all spawned subagents, so cost scales linearly with the
+      // number of subtasks.
+      const sharedContext = this.buildSharedContextSnapshot(sessionId);
+
       const subtaskDescriptors = analysis.subtasks.map(sub => ({
         task: sub.task,
         model: (sub.model && sub.model !== 'null') ? sub.model : undefined,
+        sharedContext,
       }));
 
       const taskLabels = new Map<string, string>();
@@ -623,6 +727,35 @@ Each subtask description must be self-contained with ALL context needed (file pa
     } catch (err) {
       return false;
     }
+  }
+
+  /**
+   * Fase 2.1: Build a read-only snapshot of the parent session's structured
+   * compaction for subagents. Returns undefined when there is no compaction
+   * or when the formatted snapshot would be empty.
+   *
+   * The snapshot is capped at ~500 tokens (via formatCompactionForContext's
+   * greedy budget) and further trims the file lists to the 10 most recent
+   * entries each. Subagents consume this as a prefix before the task itself.
+   */
+  private buildSharedContextSnapshot(sessionId: string): string | undefined {
+    const row = getLatestCompaction(sessionId);
+    if (!row) return undefined;
+
+    const compaction = deserializeCompaction(row.summary, row.format);
+
+    // Cap file lists — the parent may have accumulated dozens of entries
+    // over a long session; a subagent only needs the most recent ones for
+    // orientation. Keep the latest 10 by list order (append order in the
+    // compaction reflects discovery order).
+    const trimmed: StructuredCompaction = {
+      ...compaction,
+      filesRead: compaction.filesRead.slice(-10),
+      filesModified: compaction.filesModified.slice(-10),
+    };
+
+    const formatted = formatCompactionForContext(trimmed, 500);
+    return formatted.trim() || undefined;
   }
 
   private async maybeGenerateTitle(sessionId: string, model: string, userMessage: string, assistantReply: string): Promise<void> {

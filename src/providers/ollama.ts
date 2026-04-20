@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { LLMProvider, ChatMessage, ChatChunk, ToolSchema, ToolCall } from './types.js';
 import { getConfig } from '../config/index.js';
+import { StreamingTemplateStripper, stripTemplateLeakage } from './sanitize.js';
 
 export class OllamaProvider implements LLMProvider {
   name = 'ollama';
@@ -49,6 +50,7 @@ export class OllamaProvider implements LLMProvider {
     let buffer = '';
     let fullText = '';
     const accumulatedToolCalls: ToolCall[] = [];
+    const textStripper = new StreamingTemplateStripper();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -84,12 +86,16 @@ export class OllamaProvider implements LLMProvider {
 
         if (chunk.message?.content) {
           fullText += chunk.message.content;
-          yield { type: 'text', text: chunk.message.content };
+          const cleaned = textStripper.push(chunk.message.content);
+          if (cleaned) yield { type: 'text', text: cleaned };
         }
 
         if (chunk.done) {
+          const tail = textStripper.flush();
+          if (tail) yield { type: 'text', text: tail };
+
           if (accumulatedToolCalls.length === 0 && params.tools?.length) {
-            const fallbackCalls = parseFallbackToolCalls(fullText);
+            const fallbackCalls = parseFallbackToolCalls(stripTemplateLeakage(fullText));
             for (const tc of fallbackCalls) {
               accumulatedToolCalls.push(tc);
               yield { type: 'tool_call', toolCall: tc };

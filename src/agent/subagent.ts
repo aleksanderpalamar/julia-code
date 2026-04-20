@@ -7,6 +7,7 @@ import { getProjectDir } from '../config/workspace.js';
 import { createWorktree, removeWorktree, mergeWorktree, isGitRepo, type Worktree } from './worktree.js';
 import { toolContextStorage } from '../tools/registry.js';
 import type { ToolContext } from '../tools/types.js';
+import { log } from '../observability/logger.js';
 
 export interface SubagentTask {
   id: string;
@@ -14,6 +15,7 @@ export interface SubagentTask {
   parentSessionId: string;
   sessionId: string;
   task: string;
+  sharedContext?: string;
   model?: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   result?: string;
@@ -37,15 +39,37 @@ type QueuedItem = {
   model?: string;
 };
 
-class SubagentManager extends EventEmitter<SubagentEvents> {
+export class SubagentManager extends EventEmitter<SubagentEvents> {
   private tasks = new Map<string, SubagentTask>();
   private agents = new Map<string, AgentLoop>();
   private running = 0;
-  private queue: QueuedItem[] = [];
+  private runningByModel = new Map<string, number>();
+  private queuesByModel = new Map<string, QueuedItem[]>();
   private sessionPool: string[] = [];
 
   constructor() {
     super();
+  }
+
+  private getModelLimit(model: string): number {
+    const limits = getConfig().acpModelLimits ?? {};
+    return limits[model] ?? Infinity;
+  }
+
+  private canRunModel(model: string): boolean {
+    if (this.running >= getConfig().acpMaxConcurrent) return false;
+    const used = this.runningByModel.get(model) ?? 0;
+    return used < this.getModelLimit(model);
+  }
+
+  private incrementModel(model: string): void {
+    this.runningByModel.set(model, (this.runningByModel.get(model) ?? 0) + 1);
+  }
+
+  private decrementModel(model: string): void {
+    const curr = this.runningByModel.get(model) ?? 0;
+    if (curr <= 1) this.runningByModel.delete(model);
+    else this.runningByModel.set(model, curr - 1);
   }
 
   prewarm(count: number): void {
@@ -62,7 +86,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     return createSession(label).id;
   }
 
-  async spawn(parentSessionId: string, taskDescription: string | unknown, runId: string, model?: string): Promise<string> {
+  async spawn(
+    parentSessionId: string,
+    taskDescription: string | unknown,
+    runId: string,
+    model?: string,
+    sharedContext?: string,
+  ): Promise<string> {
     const config = getConfig();
     const taskId = randomUUID();
     const desc = String(taskDescription ?? '');
@@ -76,6 +106,7 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
       parentSessionId,
       sessionId,
       task: desc,
+      sharedContext,
       model: resolvedModel,
       status: 'queued',
       createdAt: new Date(),
@@ -87,11 +118,12 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
     this.emit('task:queued', taskId, preview);
 
-    const maxConcurrent = config.acpMaxConcurrent;
-    if (this.running < maxConcurrent) {
+    if (this.canRunModel(resolvedModel)) {
       this.runTask(task, resolvedModel);
     } else {
-      this.queue.push({ task, model: resolvedModel });
+      const q = this.queuesByModel.get(resolvedModel) ?? [];
+      q.push({ task, model: resolvedModel });
+      this.queuesByModel.set(resolvedModel, q);
     }
 
     return taskId;
@@ -99,16 +131,23 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
   async spawnMany(
     parentSessionId: string,
-    tasks: Array<string | { task: string; model?: string }>,
+    tasks: Array<string | { task: string; model?: string; sharedContext?: string }>,
     runId: string,
     model?: string,
+    sharedContext?: string,
   ): Promise<string[]> {
     return Promise.all(
       tasks.map(t => {
         if (typeof t === 'string') {
-          return this.spawn(parentSessionId, t, runId, model);
+          return this.spawn(parentSessionId, t, runId, model, sharedContext);
         }
-        return this.spawn(parentSessionId, t.task, runId, t.model ?? model);
+        return this.spawn(
+          parentSessionId,
+          t.task,
+          runId,
+          t.model ?? model,
+          t.sharedContext ?? sharedContext,
+        );
       })
     );
   }
@@ -160,22 +199,30 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
 
   private runTask(task: SubagentTask, model?: string): void {
     const label = task.task.slice(0, 60).replace(/\n/g, ' ');
+    const modelKey = model ?? task.model ?? '__unknown__';
     task.status = 'running';
     task.startedAt = new Date();
     this.running++;
+    this.incrementModel(modelKey);
 
     updateSubagentRunStatus(task.id, 'running', { startedAt: task.startedAt.toISOString() });
+
+    log.subagentSpawn({
+      runId: task.runId,
+      taskId: task.id,
+      model,
+      taskPreview: label,
+    });
 
     this.emit('task:started', task.id, label);
 
     const config = getConfig();
     const agent = new AgentLoop({
       maxIterations: config.acpSubagentMaxIterations,
-      excludeTools: ['subagent'], // Prevent recursive subagent spawning
+      excludeTools: ['subagent'],
     });
     this.agents.set(task.id, agent);
 
-    // Create worktree for filesystem isolation if enabled
     let worktree: Worktree | null = null;
     let toolContext: ToolContext;
 
@@ -238,8 +285,15 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         durationMs: task.durationMs,
         result: task.result,
       });
+      log.subagentDone({
+        runId: task.runId,
+        taskId: task.id,
+        status: 'completed',
+        durationMs: task.durationMs,
+      });
       this.agents.delete(task.id);
       this.running--;
+      this.decrementModel(modelKey);
       this.emit('task:completed', task.id, result);
       this.drainQueue();
     });
@@ -260,15 +314,26 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
         durationMs: task.durationMs,
         error: task.error,
       });
+      log.subagentDone({
+        runId: task.runId,
+        taskId: task.id,
+        status: 'failed',
+        durationMs: task.durationMs,
+        error,
+      });
       this.agents.delete(task.id);
       this.running--;
+      this.decrementModel(modelKey);
       this.emit('task:failed', task.id, error);
       this.drainQueue();
     });
 
-    // Run agent inside AsyncLocalStorage so all tools see the worktree path
+    const enrichedTask = task.sharedContext
+      ? `<parent_context>\n${task.sharedContext}\n</parent_context>\n\n${task.task}`
+      : task.task;
+
     toolContextStorage.run(toolContext, () => {
-      agent.run(task.sessionId, task.task, model).catch((err) => {
+      agent.run(task.sessionId, enrichedTask, model).catch((err) => {
         if (task.status === 'completed' || task.status === 'failed') return;
 
         if (worktree) {
@@ -285,8 +350,16 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
           durationMs: task.durationMs,
           error: task.error,
         });
+        log.subagentDone({
+          runId: task.runId,
+          taskId: task.id,
+          status: 'failed',
+          durationMs: task.durationMs,
+          error: errorMsg,
+        });
         this.agents.delete(task.id);
         this.running--;
+        this.decrementModel(modelKey);
         this.emit('task:failed', task.id, errorMsg);
         this.drainQueue();
       });
@@ -297,16 +370,22 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     const task = this.tasks.get(taskId);
     if (!task || task.status === 'completed' || task.status === 'failed') return false;
 
+    const modelKey = task.model ?? '__unknown__';
     const agent = this.agents.get(taskId);
     if (agent) {
       agent.abort();
       this.agents.delete(taskId);
       this.running--;
+      this.decrementModel(modelKey);
     }
 
-    const queueIdx = this.queue.findIndex(item => item.task.id === taskId);
-    if (queueIdx >= 0) {
-      this.queue.splice(queueIdx, 1);
+    for (const [k, q] of this.queuesByModel) {
+      const idx = q.findIndex(item => item.task.id === taskId);
+      if (idx >= 0) {
+        q.splice(idx, 1);
+        if (q.length === 0) this.queuesByModel.delete(k);
+        break;
+      }
     }
 
     task.status = 'failed';
@@ -315,6 +394,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
     task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
     updateSubagentRunStatus(task.id, 'failed', {
       completedAt: task.completedAt.toISOString(),
+      durationMs: task.durationMs,
+      error: 'Cancelled',
+    });
+    log.subagentDone({
+      runId: task.runId,
+      taskId: task.id,
+      status: 'failed',
       durationMs: task.durationMs,
       error: 'Cancelled',
     });
@@ -334,10 +420,13 @@ class SubagentManager extends EventEmitter<SubagentEvents> {
   }
 
   private drainQueue(): void {
-    const maxConcurrent = getConfig().acpMaxConcurrent;
-    while (this.running < maxConcurrent && this.queue.length > 0) {
-      const item = this.queue.shift()!;
-      this.runTask(item.task, item.model);
+    for (const [model, queue] of this.queuesByModel) {
+      while (queue.length > 0 && this.canRunModel(model)) {
+        const item = queue.shift()!;
+        this.runTask(item.task, item.model);
+      }
+      if (queue.length === 0) this.queuesByModel.delete(model);
+      if (this.running >= getConfig().acpMaxConcurrent) break;
     }
   }
 }
