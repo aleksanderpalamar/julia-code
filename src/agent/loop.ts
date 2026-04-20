@@ -20,6 +20,7 @@ import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from 
 import { log } from '../observability/logger.js';
 import { analyzeComplexity } from './complexity.js';
 import { maybeDeterministicRetry } from './retry.js';
+import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -382,14 +383,24 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       const provider = getProvider('ollama');
       const availableModels = await listOllamaModels();
 
-      const modelsInfo = availableModels.length > 0
-        ? `Available models: ${availableModels.join(', ')}`
-        : 'No model list available — use null for model to use the default.';
+      let analysis: { complex: boolean; subtasks?: Array<{ task: string; model?: string | null }> };
+      let plannerVia: 'llm' | 'cache';
 
-      const messages: ChatMessage[] = [
-        {
-          role: 'system',
-          content: `You are a task decomposer. The user task has already been flagged as likely complex by a heuristic — your job is to split it into 2+ independent subtasks that can run in parallel.
+      const cached = getCachedPlannerResult(sessionId, userMessage);
+      if (cached) {
+        analysis = cached;
+        plannerVia = 'cache';
+      } else {
+        plannerVia = 'llm';
+
+        const modelsInfo = availableModels.length > 0
+          ? `Available models: ${availableModels.join(', ')}`
+          : 'No model list available — use null for model to use the default.';
+
+        const messages: ChatMessage[] = [
+          {
+            role: 'system',
+            content: `You are a task decomposer. The user task has already been flagged as likely complex by a heuristic — your job is to split it into 2+ independent subtasks that can run in parallel.
 
 Rules:
 - Only split into subtasks that are CLEARLY INDEPENDENT (no sequential dependencies between them).
@@ -412,40 +423,42 @@ OR if decomposable:
 {"complex": true, "subtasks": [{"task": "detailed description of subtask 1", "model": "model-name or null"}, ...]}
 
 Each subtask description must be self-contained with ALL context needed (file paths, requirements, style). The subagent will NOT see the original conversation.`,
-        },
-        {
-          role: 'user',
-          content: userMessage,
-        },
-      ];
+          },
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ];
 
-      let response = '';
-      const stream = provider.chat({ model, messages });
-      for await (const chunk of stream) {
-        if (chunk.type === 'error') return false;
-        if (chunk.type === 'text' && chunk.text) {
-          response += chunk.text;
+        let response = '';
+        const stream = provider.chat({ model, messages });
+        for await (const chunk of stream) {
+          if (chunk.type === 'error') return false;
+          if (chunk.type === 'text' && chunk.text) {
+            response += chunk.text;
+          }
         }
-      }
 
-      response = response.trim();
-      if (response.startsWith('```')) {
-        response = response.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-      }
+        response = response.trim();
+        if (response.startsWith('```')) {
+          response = response.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+        }
 
-      let analysis: { complex: boolean; subtasks?: Array<{ task: string; model?: string | null }> };
-      try {
-        analysis = JSON.parse(response);
-      } catch {
-        log.plannerDecision({
-          sessionId,
-          complex: false,
-          subtaskCount: 0,
-          via: 'llm',
-          durationMs: Date.now() - plannerStart,
-          taskPreview,
-        });
-        return false;
+        try {
+          analysis = JSON.parse(response);
+        } catch {
+          log.plannerDecision({
+            sessionId,
+            complex: false,
+            subtaskCount: 0,
+            via: 'llm',
+            durationMs: Date.now() - plannerStart,
+            taskPreview,
+          });
+          return false;
+        }
+
+        setCachedPlannerResult(sessionId, userMessage, analysis);
       }
 
       if (!analysis.complex || !analysis.subtasks?.length) {
@@ -453,20 +466,19 @@ Each subtask description must be self-contained with ALL context needed (file pa
           sessionId,
           complex: false,
           subtaskCount: analysis.subtasks?.length ?? 0,
-          via: 'llm',
+          via: plannerVia,
           durationMs: Date.now() - plannerStart,
           taskPreview,
         });
         return false;
       }
 
-      // Fase 2.2: 1 subtarefa não precisa de subagente — cai no loop normal do agente pai.
       if (analysis.subtasks.length === 1) {
         log.plannerDecision({
           sessionId,
           complex: false,
           subtaskCount: 1,
-          via: 'llm',
+          via: plannerVia,
           durationMs: Date.now() - plannerStart,
           taskPreview,
         });
@@ -496,7 +508,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
         sessionId,
         complex: true,
         subtaskCount: analysis.subtasks.length,
-        via: 'llm',
+        via: plannerVia,
         durationMs: Date.now() - plannerStart,
         taskPreview,
       });

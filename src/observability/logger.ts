@@ -2,7 +2,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-export type PlannerVia = 'heuristic' | 'llm';
+export type PlannerVia = 'heuristic' | 'llm' | 'cache';
 
 export type ObservabilityEvent =
   | {
