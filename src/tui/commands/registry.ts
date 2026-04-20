@@ -19,6 +19,10 @@ const commands: SlashCommand[] = [
     name: "/temperament",
     description: "Set temperament: neutral | sharp | warm | auto",
   },
+  {
+    name: "/stats",
+    description: "Show orchestration and planner stats from events.jsonl",
+  },
   { name: "/quit", description: "Exit JuliaCode" },
 ];
 
