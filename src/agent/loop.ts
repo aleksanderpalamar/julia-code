@@ -14,7 +14,7 @@ import { getSubagentManager } from './subagent.js';
 import { listOllamaModels } from '../providers/ollama.js';
 import { wrapToolResult } from '../security/boundaries.js';
 import { sanitizeToolResult } from '../security/sanitize.js';
-import { getToolRisk, isBlockedCommand, matchesAllowRule, type AllowRule } from '../security/permissions.js';
+import { type AllowRule } from '../security/permissions.js';
 import { log } from '../observability/logger.js';
 import { analyzeComplexity } from './complexity.js';
 import { maybeDeterministicRetry } from './retry.js';
@@ -23,6 +23,7 @@ import { needsToolCalling } from './heuristics.js';
 import { maybeGenerateTitle } from './title-generator.js';
 import { maybeCompact, performEmergencyCompaction, buildSharedContextSnapshot } from './compactor.js';
 import { resolveModelPlan, chooseIterationModel } from './model-selection.js';
+import { evaluateToolCall } from './security-gate.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -144,6 +145,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       let switchedToCloud = false;
       let lastHadToolCalls = false;
       let retryCount = 0;
+      const approvedAllRef = { current: this.approvedAllForSession };
 
       while (iterations < maxIterations) {
         if (this.abortController?.signal.aborted) {
@@ -273,27 +275,26 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           const toolName = tc.function.name;
           const toolArgs = tc.function.arguments;
 
-          if (toolName === 'exec' && isBlockedCommand(toolArgs.command as string)) {
-            const resultText = 'Operação bloqueada: este comando está na blocklist de segurança.';
+          const gate = await evaluateToolCall({
+            toolName,
+            args: toolArgs,
+            allowRules: this.allowRules,
+            approvedAllForSession: approvedAllRef,
+            requestApproval: (n, a) => this.requestApproval(n, a),
+          });
+          if (gate.kind === 'approve_all') {
+            this.approvedAllForSession = true;
+          }
+          if (gate.kind === 'blocked') {
+            addMessage(sessionId, 'tool', gate.reason, undefined, tc.id);
+            this.emit('tool_result', toolName, gate.reason, false);
+            continue;
+          }
+          if (gate.kind === 'denied') {
+            const resultText = 'Operação negada pelo usuário.';
             addMessage(sessionId, 'tool', resultText, undefined, tc.id);
             this.emit('tool_result', toolName, resultText, false);
             continue;
-          }
-
-          const risk = getToolRisk(toolName);
-          if (risk === 'dangerous' && !this.approvedAllForSession) {
-            if (!matchesAllowRule(toolName, toolArgs, this.allowRules)) {
-              const approved = await this.requestApproval(toolName, toolArgs);
-              if (approved === 'deny') {
-                const resultText = 'Operação negada pelo usuário.';
-                addMessage(sessionId, 'tool', resultText, undefined, tc.id);
-                this.emit('tool_result', toolName, resultText, false);
-                continue;
-              }
-              if (approved === 'approve_all') {
-                this.approvedAllForSession = true;
-              }
-            }
           }
 
           const toolStart = Date.now();
