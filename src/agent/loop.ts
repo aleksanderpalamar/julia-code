@@ -230,7 +230,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     });
   }
 
-
   isRunning(): boolean {
     return this.running;
   }
