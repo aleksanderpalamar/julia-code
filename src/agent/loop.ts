@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { ChatMessage, ToolCall, ChatChunk, TokenUsage } from '../providers/types.js';
+import type { ChatMessage, ToolCall, TokenUsage } from '../providers/types.js';
 import { getProvider } from '../providers/registry.js';
 import { getToolSchemas } from '../tools/registry.js';
-import { buildContext } from './context.js';
-import { addMessage, removeLastAssistantMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
+import { addMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
-import { type ContextBudget } from '../context/budget.js';
-import { shouldEmergencyCompact, getEmergencyKeepCount, type ContextHealth } from '../context/health.js';
+import { type ContextHealth } from '../context/health.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { getSubagentManager } from './subagent.js';
@@ -16,12 +14,10 @@ import { type AllowRule } from '../security/permissions.js';
 import { log } from '../observability/logger.js';
 import { analyzeComplexity } from './complexity.js';
 import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
-import { needsToolCalling } from './heuristics.js';
 import { maybeGenerateTitle } from './title-generator.js';
-import { maybeCompact, performEmergencyCompaction, buildSharedContextSnapshot } from './compactor.js';
-import { resolveModelPlan, chooseIterationModel } from './model-selection.js';
-import { evaluateToolCall } from './security-gate.js';
-import { runToolCall } from './tool-executor.js';
+import { maybeCompact, buildSharedContextSnapshot } from './compactor.js';
+import { resolveModelPlan } from './model-selection.js';
+import { runOneIteration, type IterationDeps, type IterationEventSink, type IterationState } from './iteration.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -106,7 +102,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     setSubagentSessionId(sessionId);
     const config = getConfig();
     const requestedModel = model ?? config.defaultModel;
-    const provider = getProvider('ollama');
 
     const plan = await resolveModelPlan(requestedModel, config.toolModel);
     const { loopModel, auxModel } = plan;
@@ -120,7 +115,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       toolSchemas = toolSchemas.filter(s => !this.options.excludeTools!.includes(s.function.name));
     }
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
-    let iterations = 0;
+
+    const approvedAllRef = { current: this.approvedAllForSession };
+    let state: IterationState = { iteration: 0, switchedToCloud: false, lastHadToolCalls: false, retryCount: 0 };
 
     try {
       addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
@@ -139,195 +136,80 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         this.emit('compacting');
       }
 
-      let currentBudget: ContextBudget | null = null;
-      let switchedToCloud = false;
-      let lastHadToolCalls = false;
-      let retryCount = 0;
-      const approvedAllRef = { current: this.approvedAllForSession };
+      const deps: IterationDeps = {
+        sessionId,
+        plan,
+        toolSchemas,
+        allowRules: this.allowRules,
+        planMode: this.planMode,
+        temperament: this.temperament,
+        maxIterations,
+        signal: this.abortController.signal,
+        approvedAllRef,
+        requestApproval: (n, a) => this.requestApproval(n, a),
+        emit: this.iterationSink(),
+      };
 
-      while (iterations < maxIterations) {
-        if (this.abortController?.signal.aborted) {
-          log.loopEnd({ sessionId, iterations, reason: 'aborted' });
-          this.emit('error', 'Aborted');
-          this.running = false;
-          return;
-        }
-        iterations++;
-        this.emit('thinking');
+      while (state.iteration < maxIterations) {
+        const outcome = await runOneIteration(deps, state);
 
-        const { model: currentModel, tools: currentTools, useLocalFirst } = chooseIterationModel(
-          plan,
-          iterations,
-          switchedToCloud,
-          toolSchemas,
-        );
-
-        const { messages, budget, health } = await buildContext(sessionId, currentModel, {
-          planMode: this.planMode,
-          temperament: this.temperament,
-          iteration: iterations,
-          maxIterations,
-        });
-        currentBudget = budget;
-
-        this.emit('context_health', health);
-
-        if (shouldEmergencyCompact(health)) {
-          this.emit('compacting');
-          const keepCount = getEmergencyKeepCount(health);
-          await performEmergencyCompaction(sessionId, auxModel, keepCount);
-          const rebuilt = await buildContext(sessionId, currentModel, {
-            planMode: this.planMode,
-            temperament: this.temperament,
-            iteration: iterations,
-            maxIterations,
-            });
-          this.emit('context_health', rebuilt.health);
-          messages.length = 0;
-          messages.push(...rebuilt.messages);
-        }
-
-        let fullText = '';
-        const toolCalls: ToolCall[] = [];
-
-        const stream = provider.chat({
-          model: currentModel,
-          messages,
-          tools: currentTools,
-        });
-
-        for await (const chunk of stream) {
-          switch (chunk.type) {
-            case 'text':
-              fullText += chunk.text!;
-              this.emit('chunk', chunk.text!);
-              break;
-            case 'tool_call':
-              toolCalls.push(chunk.toolCall!);
-              this.emit('tool_call', chunk.toolCall!);
-              break;
-            case 'done':
-              if (chunk.usage) {
-                const total = chunk.usage.promptTokens + chunk.usage.completionTokens;
-                addSessionTokens(sessionId, total);
-                this.emit('usage', chunk.usage);
-              }
-              break;
-            case 'error':
-              if (lastHadToolCalls && retryCount < 1) {
-                retryCount++;
-                log.retry({ sessionId, iteration: iterations, kind: 'stream' });
-                this.emit('clear_streaming');
-                fullText = '__RETRY__';
-              } else {
-                log.loopEnd({ sessionId, iterations, reason: 'error' });
-                this.emit('error', chunk.error!);
-                this.emit('done', '');
-                this.running = false;
-                return;
-              }
-          }
-        }
-
-        if (fullText === '__RETRY__') {
+        if (outcome.kind === 'continue') {
+          state = outcome.state;
           continue;
         }
 
-        const localFailedTools = plan.localHasTools && plan.hasToolModel && !switchedToCloud
-          && toolCalls.length === 0 && needsToolCalling(fullText);
-        if ((useLocalFirst || localFailedTools) && toolCalls.length === 0 && needsToolCalling(fullText)) {
-          this.emit('clear_streaming');
-          switchedToCloud = true;
-          this.emit('chunk', `🔄 Trocando para ${loopModel} para executar ferramentas...\n\n`);
-          this.emit('model_switch', loopModel);
-          continue;
-        }
+        this.approvedAllForSession = approvedAllRef.current;
 
-        if (fullText === '' && toolCalls.length === 0 && lastHadToolCalls && retryCount < 1) {
-          retryCount++;
-          log.retry({ sessionId, iteration: iterations, kind: 'empty' });
-          continue;
-        }
-
-        addMessage(sessionId, 'assistant', fullText, toolCalls.length > 0 ? toolCalls : undefined, undefined, undefined, currentModel);
-
-        if (toolCalls.length === 0) {
-          log.loopEnd({ sessionId, iterations, reason: 'done' });
-          this.emit('done', fullText);
-          void maybeGenerateTitle(sessionId, auxModel, userMessage, fullText).then(title => {
+        if (outcome.kind === 'done') {
+          log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'done' });
+          this.emit('done', outcome.fullText);
+          void maybeGenerateTitle(sessionId, auxModel, userMessage, outcome.fullText).then(title => {
             if (title) this.emit('title', title);
           });
           this.running = false;
           return;
         }
 
-        retryCount = 0;
-
-        for (const tc of toolCalls) {
-          if (this.abortController?.signal.aborted) {
-            log.loopEnd({ sessionId, iterations, reason: 'aborted' });
-            this.emit('error', 'Aborted');
-            this.running = false;
-            return;
-          }
-          const toolName = tc.function.name;
-          const toolArgs = tc.function.arguments;
-
-          const gate = await evaluateToolCall({
-            toolName,
-            args: toolArgs,
-            allowRules: this.allowRules,
-            approvedAllForSession: approvedAllRef,
-            requestApproval: (n, a) => this.requestApproval(n, a),
-          });
-          if (gate.kind === 'approve_all') {
-            this.approvedAllForSession = true;
-          }
-          if (gate.kind === 'blocked') {
-            addMessage(sessionId, 'tool', gate.reason, undefined, tc.id);
-            this.emit('tool_result', toolName, gate.reason, false);
-            continue;
-          }
-          if (gate.kind === 'denied') {
-            const resultText = 'Operação negada pelo usuário.';
-            addMessage(sessionId, 'tool', resultText, undefined, tc.id);
-            this.emit('tool_result', toolName, resultText, false);
-            continue;
-          }
-
-          const executed = await runToolCall({
-            toolName,
-            args: toolArgs,
-            budget: currentBudget,
-            health,
-          });
-          log.toolCall({
-            sessionId,
-            iteration: iterations,
-            name: toolName,
-            success: executed.success,
-            durationMs: executed.durationMs,
-          });
-          if (executed.deterministicRetryApplied) {
-            log.retry({ sessionId, iteration: iterations, kind: 'deterministic' });
-          }
-
-          addMessage(sessionId, 'tool', executed.resultText, undefined, tc.id);
-          this.emit('tool_result', toolName, executed.resultText, executed.success);
+        if (outcome.kind === 'aborted') {
+          log.loopEnd({ sessionId, iterations: state.iteration, reason: 'aborted' });
+          this.emit('error', 'Aborted');
+          this.running = false;
+          return;
         }
 
-        lastHadToolCalls = true;
+        if (outcome.kind === 'error') {
+          log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'error' });
+          this.emit('error', outcome.message);
+          this.emit('done', '');
+          this.running = false;
+          return;
+        }
       }
 
-      log.loopEnd({ sessionId, iterations, reason: 'max_iterations' });
+      this.approvedAllForSession = approvedAllRef.current;
+      log.loopEnd({ sessionId, iterations: state.iteration, reason: 'max_iterations' });
       addMessage(sessionId, 'assistant', '[Max tool iterations reached]', undefined, undefined, undefined, auxModel);
       this.emit('done', '[Max tool iterations reached]');
     } catch (err) {
-      log.loopEnd({ sessionId, iterations, reason: 'error' });
+      log.loopEnd({ sessionId, iterations: state.iteration, reason: 'error' });
       this.emit('error', err instanceof Error ? err.message : String(err));
     } finally {
       this.running = false;
     }
+  }
+
+  private iterationSink(): IterationEventSink {
+    return {
+      thinking: () => this.emit('thinking'),
+      chunk: (text) => this.emit('chunk', text),
+      toolCall: (tc) => this.emit('tool_call', tc),
+      toolResult: (name, text, success) => this.emit('tool_result', name, text, success),
+      compacting: () => this.emit('compacting'),
+      contextHealth: (health) => this.emit('context_health', health),
+      usage: (usage) => this.emit('usage', usage),
+      clearStreaming: () => this.emit('clear_streaming'),
+      modelSwitch: (m) => this.emit('model_switch', m),
+    };
   }
 
   private requestApproval(toolName: string, args: Record<string, unknown>): Promise<ApprovalResult> {
