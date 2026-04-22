@@ -8,7 +8,6 @@ import { addMessage, removeLastAssistantMessage, addSessionTokens, createOrchest
 import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
-import { supportsTools } from '../context/model-info.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { getSubagentManager } from './subagent.js';
@@ -23,6 +22,7 @@ import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.
 import { needsToolCalling } from './heuristics.js';
 import { maybeGenerateTitle } from './title-generator.js';
 import { maybeCompact, performEmergencyCompaction, buildSharedContextSnapshot } from './compactor.js';
+import { resolveModelPlan, chooseIterationModel } from './model-selection.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -109,13 +109,10 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const requestedModel = model ?? config.defaultModel;
     const provider = getProvider('ollama');
 
-    const { getAvailableModels } = await import('../config/mcp.js');
-    const requestedIsCloud = getAvailableModels().find(m => m.id === requestedModel)?.isCloud ?? false;
-    const loopModel = (requestedIsCloud ? null : config.toolModel) ?? requestedModel;
-    const auxModel = requestedModel;
+    const plan = await resolveModelPlan(requestedModel, config.toolModel);
+    const { loopModel, auxModel } = plan;
 
-    const localToolCapable = await supportsTools(requestedModel);
-    if (loopModel !== requestedModel && !localToolCapable) {
+    if (plan.hasToolModel && !plan.localHasTools) {
       this.emit('model_switch', loopModel);
     }
 
@@ -144,12 +141,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       }
 
       let currentBudget: ContextBudget | null = null;
-      const hasToolModel = loopModel !== auxModel;
       let switchedToCloud = false;
       let lastHadToolCalls = false;
       let retryCount = 0;
-
-      const localHasTools = hasToolModel ? await supportsTools(auxModel) : false;
 
       while (iterations < maxIterations) {
         if (this.abortController?.signal.aborted) {
@@ -161,10 +155,12 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         iterations++;
         this.emit('thinking');
 
-        const useLocalFirst = iterations === 1 && hasToolModel && !localHasTools && !switchedToCloud;
-        const currentModel = switchedToCloud ? loopModel
-          : (useLocalFirst ? auxModel : (localHasTools ? auxModel : loopModel));
-        const currentTools = useLocalFirst ? undefined : toolSchemas;
+        const { model: currentModel, tools: currentTools, useLocalFirst } = chooseIterationModel(
+          plan,
+          iterations,
+          switchedToCloud,
+          toolSchemas,
+        );
 
         const { messages, budget, health } = await buildContext(sessionId, currentModel, {
           planMode: this.planMode,
@@ -237,7 +233,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           continue;
         }
 
-        const localFailedTools = localHasTools && hasToolModel && !switchedToCloud
+        const localFailedTools = plan.localHasTools && plan.hasToolModel && !switchedToCloud
           && toolCalls.length === 0 && needsToolCalling(fullText);
         if ((useLocalFirst || localFailedTools) && toolCalls.length === 0 && needsToolCalling(fullText)) {
           this.emit('clear_streaming');
