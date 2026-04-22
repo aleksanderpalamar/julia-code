@@ -124,6 +124,7 @@ function initTestDb(): Database.Database {
       tool_calls TEXT,
       tool_call_id TEXT,
       images TEXT,
+      model TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
