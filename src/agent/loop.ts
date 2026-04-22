@@ -3,11 +3,10 @@ import { EventEmitter } from 'node:events';
 import type { ChatMessage, ToolCall, ChatChunk, TokenUsage } from '../providers/types.js';
 import { getProvider } from '../providers/registry.js';
 import { getToolSchemas, executeTool } from '../tools/registry.js';
-import { buildContext, getCompactableMessages, getEmergencyCompactableMessages } from './context.js';
-import { addMessage, removeLastAssistantMessage, saveCompaction, getLatestCompaction, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
+import { buildContext } from './context.js';
+import { addMessage, removeLastAssistantMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
-import { performStructuredCompaction, serializeCompaction, deserializeCompaction, formatCompactionForContext, type StructuredCompaction } from '../context/compaction.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
 import { supportsTools } from '../context/model-info.js';
 import { setCurrentSessionId } from '../tools/memory.js';
@@ -23,6 +22,7 @@ import { maybeDeterministicRetry } from './retry.js';
 import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
 import { needsToolCalling } from './heuristics.js';
 import { maybeGenerateTitle } from './title-generator.js';
+import { maybeCompact, performEmergencyCompaction, buildSharedContextSnapshot } from './compactor.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -139,7 +139,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         }
       }
 
-      await this.maybeCompact(sessionId, auxModel);
+      if (await maybeCompact(sessionId, auxModel)) {
+        this.emit('compacting');
+      }
 
       let currentBudget: ContextBudget | null = null;
       const hasToolModel = loopModel !== auxModel;
@@ -177,7 +179,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         if (shouldEmergencyCompact(health)) {
           this.emit('compacting');
           const keepCount = getEmergencyKeepCount(health);
-          await this.performEmergencyCompaction(sessionId, auxModel, keepCount);
+          await performEmergencyCompaction(sessionId, auxModel, keepCount);
           const rebuilt = await buildContext(sessionId, currentModel, {
             planMode: this.planMode,
             temperament: this.temperament,
@@ -527,7 +529,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
       // context. Capped at ~500 tokens per subagent — the same snapshot is
       // reused across all spawned subagents, so cost scales linearly with the
       // number of subtasks.
-      const sharedContext = this.buildSharedContextSnapshot(sessionId);
+      const sharedContext = buildSharedContextSnapshot(sessionId);
 
       const subtaskDescriptors = analysis.subtasks.map(sub => ({
         task: sub.task,
@@ -732,97 +734,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
       return true;
     } catch (err) {
       return false;
-    }
-  }
-
-  /**
-   * Fase 2.1: Build a read-only snapshot of the parent session's structured
-   * compaction for subagents. Returns undefined when there is no compaction
-   * or when the formatted snapshot would be empty.
-   *
-   * The snapshot is capped at ~500 tokens (via formatCompactionForContext's
-   * greedy budget) and further trims the file lists to the 10 most recent
-   * entries each. Subagents consume this as a prefix before the task itself.
-   */
-  private buildSharedContextSnapshot(sessionId: string): string | undefined {
-    const row = getLatestCompaction(sessionId);
-    if (!row) return undefined;
-
-    const compaction = deserializeCompaction(row.summary, row.format);
-
-    // Cap file lists — the parent may have accumulated dozens of entries
-    // over a long session; a subagent only needs the most recent ones for
-    // orientation. Keep the latest 10 by list order (append order in the
-    // compaction reflects discovery order).
-    const trimmed: StructuredCompaction = {
-      ...compaction,
-      filesRead: compaction.filesRead.slice(-10),
-      filesModified: compaction.filesModified.slice(-10),
-    };
-
-    const formatted = formatCompactionForContext(trimmed, 500);
-    return formatted.trim() || undefined;
-  }
-
-  private async maybeCompact(sessionId: string, model: string): Promise<void> {
-    const compactable = await getCompactableMessages(sessionId, model);
-    if (!compactable) return;
-
-    this.emit('compacting');
-
-    try {
-      const existingCompaction = getLatestCompaction(sessionId);
-
-      let existingStructured: StructuredCompaction | null = null;
-      if (existingCompaction) {
-        existingStructured = deserializeCompaction(
-          existingCompaction.summary,
-          existingCompaction.format,
-        );
-      }
-
-      const structured = await performStructuredCompaction(
-        compactable.messages,
-        existingStructured,
-        model,
-      );
-
-      const summary = serializeCompaction(structured);
-      if (summary) {
-        const startId = existingCompaction?.messages_end ?? 0;
-        saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
-      }
-    } catch {
-    }
-  }
-
-  private async performEmergencyCompaction(sessionId: string, model: string, keepCount: number): Promise<void> {
-    const compactable = await getEmergencyCompactableMessages(sessionId, model, keepCount);
-    if (!compactable) return;
-
-    try {
-      const existingCompaction = getLatestCompaction(sessionId);
-
-      let existingStructured: StructuredCompaction | null = null;
-      if (existingCompaction) {
-        existingStructured = deserializeCompaction(
-          existingCompaction.summary,
-          existingCompaction.format,
-        );
-      }
-
-      const structured = await performStructuredCompaction(
-        compactable.messages,
-        existingStructured,
-        model,
-      );
-
-      const summary = serializeCompaction(structured);
-      if (summary) {
-        const startId = existingCompaction?.messages_end ?? 0;
-        saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
-      }
-    } catch {
     }
   }
 
