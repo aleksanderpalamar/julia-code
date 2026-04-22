@@ -172,7 +172,33 @@ vi.mock("../src/context/compaction.js", async (importOriginal) => {
 // --- Imports ---
 
 import { createSession } from "../src/session/manager.js";
-import { AgentLoop } from "../src/agent/loop.js";
+import { runOrchestration, type OrchestrationEventSink } from "../src/agent/orchestrator.js";
+
+type SinkCapture = {
+  chunks: string[];
+  sink: OrchestrationEventSink;
+};
+
+function makeSink(override: Partial<OrchestrationEventSink> = {}): OrchestrationEventSink {
+  return {
+    chunk: () => {},
+    usage: () => {},
+    done: () => {},
+    title: () => {},
+    subagentChunk: () => {},
+    subagentStatus: () => {},
+    progress: () => {},
+    ...override,
+  };
+}
+
+function makeCapture(): SinkCapture {
+  const chunks: string[] = [];
+  return {
+    chunks,
+    sink: makeSink({ chunk: (text) => chunks.push(text) }),
+  };
+}
 
 // --- DB Setup ---
 
@@ -256,7 +282,7 @@ function initTestDb(): Database.Database {
 
 // --- Tests ---
 
-// Fase 1: the deterministic heuristic now short-circuits `maybeOrchestrate`
+// Fase 1: the deterministic heuristic now short-circuits `runOrchestration`
 // before the LLM is called. Tests that need the LLM path must provide a
 // prompt the heuristic classifies as complex. A numbered list of 3+ items
 // triggers the `numbered_list_3+` signal regardless of total length.
@@ -297,12 +323,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(true);
   });
@@ -315,12 +341,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "what is TypeScript?",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "what is TypeScript?",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
     expect(spawnedTasks).toHaveLength(0);
@@ -344,12 +370,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(spawnedTasks).toHaveLength(3);
     expect(spawnedTasks[0].task).toContain("GET");
@@ -365,12 +391,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "refactor the entire codebase",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "refactor the entire codebase",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
     expect(spawnedTasks).toHaveLength(0);
@@ -381,12 +407,12 @@ describe("ACP Complexity Detection", () => {
 
     mockChatResponse = [{ type: "error", error: "model not available" }];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "create 5 microservices",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "create 5 microservices",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
     expect(spawnedTasks).toHaveLength(0);
@@ -408,12 +434,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(true);
     expect(spawnedTasks).toHaveLength(2);
@@ -427,12 +453,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "do something",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "do something",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
     expect(spawnedTasks).toHaveLength(0);
@@ -446,12 +472,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "do something complex",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "do something complex",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
   });
@@ -464,12 +490,12 @@ describe("ACP Complexity Detection", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(capturedChatCalls).toHaveLength(1);
     expect(capturedChatCalls[0].model).toBe("test-model");
@@ -520,8 +546,12 @@ describe("ACP Model Resolution", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(spawnedTasks).toHaveLength(2);
     expect(spawnedTasks[0].model).toBe("qwen3:8b");
@@ -546,8 +576,12 @@ describe("ACP Model Resolution", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(spawnedTasks).toHaveLength(2);
     // Model should be undefined (null fallback → no model override)
@@ -573,8 +607,12 @@ describe("ACP Model Resolution", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(spawnedTasks).toHaveLength(2);
     expect(spawnedTasks[0].model).toBeUndefined();
@@ -615,8 +653,12 @@ describe("ACP Orchestration Events and DB Persistence", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     // Verify orchestration run was saved in DB
     const runs = testDb
@@ -644,15 +686,14 @@ describe("ACP Orchestration Events and DB Persistence", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const chunks: string[] = [];
-    agent.on("chunk", (text) => chunks.push(text));
+    const { chunks, sink } = makeCapture();
 
-    await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: sink,
+    });
 
     // Should have emitted orchestration announcement
     const announcement = chunks.find((c) => c.includes("Tarefa complexa detectada"));
@@ -680,8 +721,12 @@ describe("ACP Orchestration Events and DB Persistence", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(session.id, COMPLEX_PROMPT, "test-model");
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(mockManager.prewarm).toHaveBeenCalledWith(3);
     expect(mockManager.spawnMany).toHaveBeenCalledTimes(1);
@@ -718,12 +763,12 @@ describe("ACP Edge Cases", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "single complex operation",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "single complex operation",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     // Fase 2.2: with a single subtask we short-circuit to keep execution
     // in the parent loop (avoids the subagent spawn overhead).
@@ -744,12 +789,12 @@ describe("ACP Edge Cases", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(true);
     expect(spawnedTasks).toHaveLength(2);
@@ -763,12 +808,12 @@ describe("ACP Edge Cases", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "hello, how are you?",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "hello, how are you?",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
     expect(spawnedTasks).toHaveLength(0);
@@ -782,12 +827,12 @@ describe("ACP Edge Cases", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      "what is the difference between let and const?",
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: "what is the difference between let and const?",
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(false);
     expect(spawnedTasks).toHaveLength(0);
@@ -809,12 +854,12 @@ describe("ACP Edge Cases", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const result = await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    const result = await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(result).toBe(true);
     expect(spawnedTasks).toHaveLength(8);
@@ -886,12 +931,12 @@ describe("ACP SharedContext (Fase 2.1)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(spawnedTasks).toHaveLength(2);
     expect(spawnedTasks[0].sharedContext).toBeUndefined();
@@ -923,12 +968,12 @@ describe("ACP SharedContext (Fase 2.1)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     expect(spawnedTasks).toHaveLength(3);
     const snapshots = spawnedTasks.map(t => t.sharedContext);
@@ -967,12 +1012,12 @@ describe("ACP SharedContext (Fase 2.1)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeOrchestrate(
-      session.id,
-      COMPLEX_PROMPT,
-      "test-model",
-    );
+    await runOrchestration({
+      sessionId: session.id,
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      emit: makeSink(),
+    });
 
     const snapshot = spawnedTasks[0].sharedContext!;
     expect(snapshot).toBeDefined();

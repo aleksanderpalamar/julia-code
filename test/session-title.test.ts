@@ -9,7 +9,7 @@ import {
   addMessage,
   getMessageCount,
 } from "../src/session/manager.js";
-import { AgentLoop } from "../src/agent/loop.js";
+import { maybeGenerateTitle } from "../src/agent/title-generator.js";
 
 vi.mock("../src/config/index.js", () => ({
   getConfig: () => ({
@@ -124,6 +124,7 @@ function initTestDb(): Database.Database {
       tool_calls TEXT,
       tool_call_id TEXT,
       images TEXT,
+      model TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -240,16 +241,15 @@ describe("Session Title Generation Flow (maybeGenerateTitle)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeGenerateTitle(
+    const title = await maybeGenerateTitle(
       session.id,
       "test-model",
       "create a REST server with 3 endpoints",
       "Sure! I will create a REST server with Express...",
     );
 
+    expect(title).toBe("REST Server Setup");
     const updated = getSession(session.id);
-    expect(updated!.title).not.toBe("New Session");
     expect(updated!.title).toBe("REST Server Setup");
   });
 
@@ -264,14 +264,14 @@ describe("Session Title Generation Flow (maybeGenerateTitle)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeGenerateTitle(
+    const title = await maybeGenerateTitle(
       session.id,
       "test-model",
       "hello",
       "Hi there!",
     );
 
+    expect(title).toBeNull();
     const updated = getSession(session.id);
     expect(updated!.title).toBe("My Custom Title");
   });
@@ -292,14 +292,14 @@ describe("Session Title Generation Flow (maybeGenerateTitle)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeGenerateTitle(
+    const title = await maybeGenerateTitle(
       session.id,
       "test-model",
       "third message",
       "third reply",
     );
 
+    expect(title).toBeNull();
     const updated = getSession(session.id);
     expect(updated!.title).toBe("New Session");
   });
@@ -314,14 +314,14 @@ describe("Session Title Generation Flow (maybeGenerateTitle)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeGenerateTitle(
+    const title = await maybeGenerateTitle(
       session.id,
       "test-model",
       "build a todo app",
       "I will build a todo app...",
     );
 
+    expect(title).toBe("Todo App Development");
     const updated = getSession(session.id);
     expect(updated!.title).toBe("Todo App Development");
   });
@@ -333,14 +333,14 @@ describe("Session Title Generation Flow (maybeGenerateTitle)", () => {
 
     mockChatResponse = [{ type: "error", error: "model not found" }];
 
-    const agent = new AgentLoop();
-    await (agent as any).maybeGenerateTitle(
+    const title = await maybeGenerateTitle(
       session.id,
       "test-model",
       "hello",
       "hi",
     );
 
+    expect(title).toBeNull();
     const updated = getSession(session.id);
     expect(updated!.title).toBe("New Session");
   });
@@ -355,19 +355,14 @@ describe("Session Title Generation Flow (maybeGenerateTitle)", () => {
       { type: "done" },
     ];
 
-    const agent = new AgentLoop();
-    const emittedTitles: string[] = [];
-    agent.on("title", (title) => emittedTitles.push(title));
-
-    await (agent as any).maybeGenerateTitle(
+    const title = await maybeGenerateTitle(
       session.id,
       "test-model",
       "explain async await",
       "Async/await is a pattern...",
     );
 
-    expect(emittedTitles).toHaveLength(1);
-    expect(emittedTitles[0]).toBe("Async Await Explained");
+    expect(title).toBe("Async Await Explained");
 
     const updated = getSession(session.id);
     expect(updated!.title).toBe("Async Await Explained");
