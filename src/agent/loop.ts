@@ -4,7 +4,7 @@ import type { ChatMessage, ToolCall, ChatChunk, TokenUsage } from '../providers/
 import { getProvider } from '../providers/registry.js';
 import { getToolSchemas, executeTool } from '../tools/registry.js';
 import { buildContext, getCompactableMessages, getEmergencyCompactableMessages } from './context.js';
-import { addMessage, removeLastAssistantMessage, saveCompaction, getLatestCompaction, addSessionTokens, getSession, updateSessionTitle, getMessageCount, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
+import { addMessage, removeLastAssistantMessage, saveCompaction, getLatestCompaction, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
 import { performStructuredCompaction, serializeCompaction, deserializeCompaction, formatCompactionForContext, type StructuredCompaction } from '../context/compaction.js';
@@ -22,6 +22,7 @@ import { analyzeComplexity } from './complexity.js';
 import { maybeDeterministicRetry } from './retry.js';
 import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
 import { needsToolCalling } from './heuristics.js';
+import { maybeGenerateTitle } from './title-generator.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -255,7 +256,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         if (toolCalls.length === 0) {
           log.loopEnd({ sessionId, iterations, reason: 'done' });
           this.emit('done', fullText);
-          this.maybeGenerateTitle(sessionId, auxModel, userMessage, fullText);
+          void maybeGenerateTitle(sessionId, auxModel, userMessage, fullText).then(title => {
+            if (title) this.emit('title', title);
+          });
           this.running = false;
           return;
         }
@@ -723,7 +726,9 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const fullOutput = `🔀 ${analysis.subtasks.length} subagentes executados (${completed} ok, ${failed} falhas)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
       addMessage(sessionId, 'assistant', fullOutput, undefined, undefined, undefined, model);
       this.emit('done', fullOutput);
-      this.maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500));
+      void maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500)).then(title => {
+        if (title) this.emit('title', title);
+      });
       return true;
     } catch (err) {
       return false;
@@ -757,44 +762,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
     const formatted = formatCompactionForContext(trimmed, 500);
     return formatted.trim() || undefined;
-  }
-
-  private async maybeGenerateTitle(sessionId: string, model: string, userMessage: string, assistantReply: string): Promise<void> {
-    try {
-      const session = getSession(sessionId);
-      if (!session || session.title !== 'New Session') return;
-
-      const count = getMessageCount(sessionId);
-      if (count > 4) return;
-
-      const provider = getProvider('ollama');
-      const messages: ChatMessage[] = [
-        {
-          role: 'system',
-          content: 'Generate a short title (max 6 words) for this conversation. Output ONLY the title, nothing else. No quotes, no punctuation at the end.',
-        },
-        {
-          role: 'user',
-          content: `User: ${userMessage}\nAssistant: ${assistantReply.slice(0, 300)}`,
-        },
-      ];
-
-      let title = '';
-      const stream = provider.chat({ model, messages });
-      for await (const chunk of stream) {
-        if (chunk.type === 'error') return;
-        if (chunk.type === 'text' && chunk.text) {
-          title += chunk.text;
-        }
-      }
-
-      title = title.trim().replace(/^["']|["']$/g, '').slice(0, 80);
-      if (title) {
-        updateSessionTitle(sessionId, title);
-        this.emit('title', title);
-      }
-    } catch {
-    }
   }
 
   private async maybeCompact(sessionId: string, model: string): Promise<void> {
