@@ -2,28 +2,26 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { ChatMessage, ToolCall, ChatChunk, TokenUsage } from '../providers/types.js';
 import { getProvider } from '../providers/registry.js';
-import { getToolSchemas, executeTool } from '../tools/registry.js';
+import { getToolSchemas } from '../tools/registry.js';
 import { buildContext } from './context.js';
 import { addMessage, removeLastAssistantMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
-import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
-import { shouldEmergencyCompact, getEmergencyKeepCount, getToolResultCapFactor, type ContextHealth } from '../context/health.js';
+import { type ContextBudget } from '../context/budget.js';
+import { shouldEmergencyCompact, getEmergencyKeepCount, type ContextHealth } from '../context/health.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { getSubagentManager } from './subagent.js';
 import { listOllamaModels } from '../providers/ollama.js';
-import { wrapToolResult } from '../security/boundaries.js';
-import { sanitizeToolResult } from '../security/sanitize.js';
 import { type AllowRule } from '../security/permissions.js';
 import { log } from '../observability/logger.js';
 import { analyzeComplexity } from './complexity.js';
-import { maybeDeterministicRetry } from './retry.js';
 import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
 import { needsToolCalling } from './heuristics.js';
 import { maybeGenerateTitle } from './title-generator.js';
 import { maybeCompact, performEmergencyCompaction, buildSharedContextSnapshot } from './compactor.js';
 import { resolveModelPlan, chooseIterationModel } from './model-selection.js';
 import { evaluateToolCall } from './security-gate.js';
+import { runToolCall } from './tool-executor.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export interface OrchestrationProgress {
@@ -297,43 +295,25 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             continue;
           }
 
-          const toolStart = Date.now();
-          const result = await executeTool(toolName, toolArgs);
+          const executed = await runToolCall({
+            toolName,
+            args: toolArgs,
+            budget: currentBudget,
+            health,
+          });
           log.toolCall({
             sessionId,
             iteration: iterations,
             name: toolName,
-            success: result.success,
-            durationMs: Date.now() - toolStart,
+            success: executed.success,
+            durationMs: executed.durationMs,
           });
-
-          let errorWithHint = result.error;
-          if (!result.success && result.error) {
-            const retry = await maybeDeterministicRetry(result.error, toolArgs);
-            if (retry) {
-              log.retry({ sessionId, iteration: iterations, kind: 'deterministic' });
-              errorWithHint = result.error + retry.hint;
-            }
+          if (executed.deterministicRetryApplied) {
+            log.retry({ sessionId, iteration: iterations, kind: 'deterministic' });
           }
 
-          let resultText = result.success
-            ? result.output
-            : `Error: ${errorWithHint}\n${result.output}`;
-
-          let maxResultChars = 12000;           if (currentBudget) {
-            maxResultChars = computeToolResultCap(currentBudget, toolName);
-            const capFactor = getToolResultCapFactor(health);
-            maxResultChars = Math.floor(maxResultChars * capFactor);
-          }
-          if (resultText.length > maxResultChars) {
-            resultText = resultText.slice(0, maxResultChars) + '\n... [truncated — use offset/limit for large files]';
-          }
-
-          resultText = sanitizeToolResult(resultText);
-          resultText = wrapToolResult(toolName, resultText);
-
-          addMessage(sessionId, 'tool', resultText, undefined, tc.id);
-          this.emit('tool_result', toolName, resultText, result.success);
+          addMessage(sessionId, 'tool', executed.resultText, undefined, tc.id);
+          this.emit('tool_result', toolName, executed.resultText, executed.success);
         }
 
         lastHadToolCalls = true;
