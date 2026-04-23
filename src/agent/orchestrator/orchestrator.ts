@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ChatMessage } from '../../providers/types.js';
 import { getProvider } from '../../providers/registry.js';
-import { addMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../../session/manager.js';
+import { addMessage, createOrchestrationRun, completeOrchestrationRun } from '../../session/manager.js';
 import { listOllamaModels } from '../../providers/ollama.js';
 import { log } from '../../observability/logger.js';
 import { analyzeComplexity } from '../complexity.js';
@@ -11,6 +11,7 @@ import { buildSharedContextSnapshot } from '../compactor.js';
 import { maybeGenerateTitle } from '../title-generator.js';
 import type { SubagentTask } from '../subagent.js';
 import type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress } from './types.js';
+import { synthesizeFailureReport } from './synthesis.js';
 
 export type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress };
 
@@ -334,39 +335,13 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
     let synthesisText = '';
     if (failed > 0) {
-      try {
-        const synthesisMessages: ChatMessage[] = [
-          {
-            role: 'system',
-            content: 'You are a helpful assistant. The user gave a task that was split into subtasks and executed in parallel by subagents. Some subtasks failed. Briefly explain what succeeded and what went wrong, and suggest how to fix the failures. Be concise and direct. Respond in the same language the user used.',
-          },
-          {
-            role: 'user',
-            content: `Original request: "${userMessage}"\n\nSubagent results:\n\n${resultLines.filter(Boolean).join('\n\n---\n\n')}`,
-          },
-        ];
-
-        const synthStream = provider.chat({
-          model,
-          messages: synthesisMessages,
-        });
-
-        for await (const chunk of synthStream) {
-          if (chunk.type === 'text' && chunk.text) {
-            synthesisText += chunk.text;
-            emit.chunk(chunk.text);
-          }
-          if (chunk.type === 'done' && chunk.usage) {
-            const totalTokens = chunk.usage.promptTokens + chunk.usage.completionTokens;
-            addSessionTokens(sessionId, totalTokens);
-            emit.usage(chunk.usage);
-          }
-          if (chunk.type === 'error') {
-            break;
-          }
-        }
-      } catch {
-      }
+      synthesisText = await synthesizeFailureReport({
+        sessionId,
+        userMessage,
+        model,
+        resultLines,
+        emit,
+      });
     }
 
     const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
