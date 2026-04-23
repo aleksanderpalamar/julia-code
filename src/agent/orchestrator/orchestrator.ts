@@ -1,184 +1,40 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatMessage } from '../../providers/types.js';
-import { getProvider } from '../../providers/registry.js';
 import { addMessage, createOrchestrationRun, completeOrchestrationRun } from '../../session/manager.js';
-import { listOllamaModels } from '../../providers/ollama.js';
-import { log } from '../../observability/logger.js';
-import { analyzeComplexity } from '../complexity.js';
-import { getCachedPlannerResult, setCachedPlannerResult } from '../planner-cache.js';
 import { getSubagentManager } from '../subagent.js';
 import { buildSharedContextSnapshot } from '../compactor.js';
 import { maybeGenerateTitle } from '../title-generator.js';
 import type { SubagentTask } from '../subagent.js';
 import type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress } from './types.js';
 import { synthesizeFailureReport } from './synthesis.js';
+import { planSubtasks } from './planner.js';
 
 export type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress };
 
 export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean> {
   const { sessionId, userMessage, model, emit } = deps;
 
-  const plannerStart = Date.now();
-  const taskPreview = userMessage.slice(0, 120).replace(/\n/g, ' ');
+  const plan = await planSubtasks({ sessionId, userMessage, model });
+  if (plan.kind === 'simple') return false;
 
-  const heuristic = analyzeComplexity(userMessage);
-  if (!heuristic.complex) {
-    log.plannerDecision({
-      sessionId,
-      complex: false,
-      subtaskCount: 0,
-      via: 'heuristic',
-      durationMs: Date.now() - plannerStart,
-      taskPreview,
-    });
-    return false;
-  }
+  const { subtasks } = plan;
 
   try {
-    const provider = getProvider('ollama');
-    const availableModels = await listOllamaModels();
-
-    let analysis: { complex: boolean; subtasks?: Array<{ task: string; model?: string | null }> };
-    let plannerVia: 'llm' | 'cache';
-
-    const cached = getCachedPlannerResult(sessionId, userMessage);
-    if (cached) {
-      analysis = cached;
-      plannerVia = 'cache';
-    } else {
-      plannerVia = 'llm';
-
-      const modelsInfo = availableModels.length > 0
-        ? `Available models: ${availableModels.join(', ')}`
-        : 'No model list available — use null for model to use the default.';
-
-      const messages: ChatMessage[] = [
-        {
-          role: 'system',
-          content: `You are a task decomposer. The user task has already been flagged as likely complex by a heuristic — your job is to split it into 2+ independent subtasks that can run in parallel.
-
-Rules:
-- Only split into subtasks that are CLEARLY INDEPENDENT (no sequential dependencies between them).
-- If, after inspection, the task is actually simple or sequential, return {"complex": false} — this overrides the heuristic.
-- If you can only think of 1 subtask, return {"complex": false} (the parent loop will handle it).
-- Prefer 2–6 subtasks. Avoid splitting into more parts than are actually independent.
-
-${modelsInfo}
-
-You can assign different models to subtasks based on their nature:
-- Use larger/stronger models for complex coding tasks
-- Use smaller/faster models for simple file operations or text generation
-- Use null to use the default model
-- IMPORTANT: You MUST use the EXACT full model name as it appears in the available models list above (including the tag after the colon). Do NOT abbreviate or truncate model names.
-
-Respond with ONLY valid JSON, no markdown, no explanation:
-{"complex": false}
-
-OR if decomposable:
-{"complex": true, "subtasks": [{"task": "detailed description of subtask 1", "model": "model-name or null"}, ...]}
-
-Each subtask description must be self-contained with ALL context needed (file paths, requirements, style). The subagent will NOT see the original conversation.`,
-        },
-        {
-          role: 'user',
-          content: userMessage,
-        },
-      ];
-
-      let response = '';
-      const stream = provider.chat({ model, messages });
-      for await (const chunk of stream) {
-        if (chunk.type === 'error') return false;
-        if (chunk.type === 'text' && chunk.text) {
-          response += chunk.text;
-        }
-      }
-
-      response = response.trim();
-      if (response.startsWith('```')) {
-        response = response.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-      }
-
-      try {
-        analysis = JSON.parse(response);
-      } catch {
-        log.plannerDecision({
-          sessionId,
-          complex: false,
-          subtaskCount: 0,
-          via: 'llm',
-          durationMs: Date.now() - plannerStart,
-          taskPreview,
-        });
-        return false;
-      }
-
-      setCachedPlannerResult(sessionId, userMessage, analysis);
-    }
-
-    if (!analysis.complex || !analysis.subtasks?.length) {
-      log.plannerDecision({
-        sessionId,
-        complex: false,
-        subtaskCount: analysis.subtasks?.length ?? 0,
-        via: plannerVia,
-        durationMs: Date.now() - plannerStart,
-        taskPreview,
-      });
-      return false;
-    }
-
-    if (analysis.subtasks.length === 1) {
-      log.plannerDecision({
-        sessionId,
-        complex: false,
-        subtaskCount: 1,
-        via: plannerVia,
-        durationMs: Date.now() - plannerStart,
-        taskPreview,
-      });
-      return false;
-    }
-
-    if (availableModels.length > 0) {
-      for (const sub of analysis.subtasks) {
-        if (sub.model && sub.model !== 'null') {
-          if (!availableModels.includes(sub.model)) {
-            const match = availableModels.find(m => m.startsWith(sub.model + ':') || m === sub.model);
-            if (match) {
-              sub.model = match;
-            } else {
-              sub.model = null;
-            }
-          }
-        }
-      }
-    }
-
     const runId = randomUUID();
     const orchestrationStart = Date.now();
 
-    createOrchestrationRun(runId, sessionId, userMessage, analysis.subtasks.length);
-    log.plannerDecision({
-      sessionId,
-      complex: true,
-      subtaskCount: analysis.subtasks.length,
-      via: plannerVia,
-      durationMs: Date.now() - plannerStart,
-      taskPreview,
-    });
+    createOrchestrationRun(runId, sessionId, userMessage, subtasks.length);
 
-    emit.chunk(`🔀 Complex task detected - spawning ${analysis.subtasks.length} subagents... (run: ${runId.slice(0, 8)})\n\n`);
+    emit.chunk(`🔀 Complex task detected - spawning ${subtasks.length} subagents... (run: ${runId.slice(0, 8)})\n\n`);
 
     const manager = getSubagentManager();
 
-    manager.prewarm(analysis.subtasks.length);
+    manager.prewarm(subtasks.length);
 
     const sharedContext = buildSharedContextSnapshot(sessionId);
 
-    const subtaskDescriptors = analysis.subtasks.map(sub => ({
+    const subtaskDescriptors = subtasks.map(sub => ({
       task: sub.task,
-      model: (sub.model && sub.model !== 'null') ? sub.model : undefined,
+      model: sub.model,
       sharedContext,
     }));
 
@@ -208,7 +64,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
       emit.subagentStatus(taskId, label, 'failed', task?.durationMs);
     };
 
-    const total = analysis.subtasks.length;
+    const total = subtasks.length;
     let progressCompleted = 0;
     let progressFailed = 0;
 
@@ -257,8 +113,8 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
     const taskIds = await manager.spawnMany(sessionId, subtaskDescriptors, runId);
 
-    for (let i = 0; i < analysis.subtasks.length; i++) {
-      const sub = analysis.subtasks[i];
+    for (let i = 0; i < subtasks.length; i++) {
+      const sub = subtasks[i];
       const label = sub.task.slice(0, 60).replace(/\n/g, ' ');
       taskLabels.set(taskIds[i], label);
       spawnedTaskIds.add(taskIds[i]);
@@ -284,7 +140,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
         const task = manager.getTask(taskId)!;
         const idx = taskIdToIndex.get(taskId)!;
-        const subDesc = analysis.subtasks![idx]?.task.slice(0, 60) ?? `subtask ${idx + 1}`;
+        const subDesc = subtasks[idx]?.task.slice(0, 60) ?? `subtask ${idx + 1}`;
 
         if (task.status === 'completed') {
           earlyCompleted++;
@@ -345,7 +201,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
     }
 
     const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
-    const fullOutput = `🔀 ${analysis.subtasks.length} executed subagents (${completed} ok, ${failed} failed)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
+    const fullOutput = `🔀 ${subtasks.length} executed subagents (${completed} ok, ${failed} failed)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
     addMessage(sessionId, 'assistant', fullOutput, undefined, undefined, undefined, model);
     emit.done(fullOutput);
     void maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500)).then(title => {
