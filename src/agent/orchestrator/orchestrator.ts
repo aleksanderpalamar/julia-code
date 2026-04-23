@@ -16,48 +16,36 @@ export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean
   if (plan.kind === 'simple') return false;
 
   const { subtasks } = plan;
+  const runId = randomUUID();
+  const orchestrationStart = Date.now();
 
-  try {
-    const runId = randomUUID();
-    const orchestrationStart = Date.now();
+  createOrchestrationRun(runId, sessionId, userMessage, subtasks.length);
+  emit.chunk(`🔀 Complex task detected - spawning ${subtasks.length} subagents... (run: ${runId.slice(0, 8)})\n\n`);
 
-    createOrchestrationRun(runId, sessionId, userMessage, subtasks.length);
-    emit.chunk(`🔀 Complex task detected - spawning ${subtasks.length} subagents... (run: ${runId.slice(0, 8)})\n\n`);
+  const sharedContext = buildSharedContextSnapshot(sessionId);
 
-    const sharedContext = buildSharedContextSnapshot(sessionId);
+  const { resultLines, completed, failed, allDone } = await executeSubagents({
+    sessionId,
+    runId,
+    subtasks,
+    sharedContext,
+    emit,
+  });
 
-    const { resultLines, completed, failed, allDone } = await executeSubagents({
-      sessionId,
-      runId,
-      subtasks,
-      sharedContext,
-      emit,
-    });
+  completeOrchestrationRun(runId, allDone ? 'completed' : 'failed', Date.now() - orchestrationStart);
 
-    completeOrchestrationRun(runId, allDone ? 'completed' : 'failed', Date.now() - orchestrationStart);
+  emit.chunk(`\n✅ ${completed} completed, ${failed > 0 ? `❌ ${failed} failed` : 'no flaws'}\n\n`);
 
-    emit.chunk(`\n✅ ${completed} completed, ${failed > 0 ? `❌ ${failed} failed` : 'no flaws'}\n\n`);
+  const synthesisText = failed > 0
+    ? await synthesizeFailureReport({ sessionId, userMessage, model, resultLines, emit })
+    : '';
 
-    let synthesisText = '';
-    if (failed > 0) {
-      synthesisText = await synthesizeFailureReport({
-        sessionId,
-        userMessage,
-        model,
-        resultLines,
-        emit,
-      });
-    }
-
-    const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
-    const fullOutput = `🔀 ${subtasks.length} executed subagents (${completed} ok, ${failed} failed)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
-    addMessage(sessionId, 'assistant', fullOutput, undefined, undefined, undefined, model);
-    emit.done(fullOutput);
-    void maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500)).then(title => {
-      if (title) emit.title(title);
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
+  const fullOutput = `🔀 ${subtasks.length} executed subagents (${completed} ok, ${failed} failed)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
+  addMessage(sessionId, 'assistant', fullOutput, undefined, undefined, undefined, model);
+  emit.done(fullOutput);
+  void maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500)).then(title => {
+    if (title) emit.title(title);
+  });
+  return true;
 }
