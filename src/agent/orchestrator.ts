@@ -190,7 +190,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
       taskPreview,
     });
 
-    emit.chunk(`🔀 Tarefa complexa detectada — spawnando ${analysis.subtasks.length} subagentes... (run: ${runId.slice(0, 8)})\n\n`);
+    emit.chunk(`🔀 Complex task detected - spawning ${analysis.subtasks.length} subagents... (run: ${runId.slice(0, 8)})\n\n`);
 
     const manager = getSubagentManager();
 
@@ -284,10 +284,10 @@ Each subtask description must be self-contained with ALL context needed (file pa
       const label = sub.task.slice(0, 60).replace(/\n/g, ' ');
       taskLabels.set(taskIds[i], label);
       spawnedTaskIds.add(taskIds[i]);
-      emit.chunk(`  → Subagente: ${sub.task.slice(0, 80)}${sub.model ? ` [${sub.model}]` : ''}\n`);
+      emit.chunk(`🤖 → Subagent: ${sub.task.slice(0, 80)}${sub.model ? ` [${sub.model}]` : ''}\n`);
     }
 
-    emit.chunk(`\n⏳ Aguardando ${taskIds.length} subagentes...\n`);
+    emit.chunk(`\n⏳ Waiting ${taskIds.length} subagents...\n`);
 
     emitProgress();
 
@@ -353,7 +353,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
     const completed = earlyCompleted;
     const failed = earlyFailed;
 
-    emit.chunk(`\n✅ ${completed} completados, ${failed > 0 ? `❌ ${failed} falharam` : 'nenhuma falha'}\n\n`);
+    emit.chunk(`\n✅ ${completed} completed, ${failed > 0 ? `❌ ${failed} failed` : 'no flaws'}\n\n`);
 
     let synthesisText = '';
     if (failed > 0) {
