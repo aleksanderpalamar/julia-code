@@ -12,7 +12,7 @@ import { maybeGenerateTitle } from './title-generator.js';
 import { maybeCompact } from './compactor.js';
 import { resolveModelPlan } from './model-selection.js';
 import { runOneIteration, type IterationDeps, type IterationEventSink, type IterationState } from './iteration.js';
-import { runOrchestration, type OrchestrationEventSink, type OrchestrationProgress } from './orchestrator.js';
+import { runOrchestration, type OrchestrationEventSink, type OrchestrationProgress } from './orchestrator/index.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
 export type { OrchestrationProgress };

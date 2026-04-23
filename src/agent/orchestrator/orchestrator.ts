@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatMessage, TokenUsage } from '../providers/types.js';
-import { getProvider } from '../providers/registry.js';
-import { addMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
-import { listOllamaModels } from '../providers/ollama.js';
-import { log } from '../observability/logger.js';
-import { analyzeComplexity } from './complexity.js';
-import { getCachedPlannerResult, setCachedPlannerResult } from './planner-cache.js';
-import { getSubagentManager } from './subagent.js';
-import { buildSharedContextSnapshot } from './compactor.js';
-import { maybeGenerateTitle } from './title-generator.js';
-import type { SubagentTask } from './subagent.js';
+import type { ChatMessage, TokenUsage } from '../../providers/types.js';
+import { getProvider } from '../../providers/registry.js';
+import { addMessage, addSessionTokens, createOrchestrationRun, completeOrchestrationRun } from '../../session/manager.js';
+import { listOllamaModels } from '../../providers/ollama.js';
+import { log } from '../../observability/logger.js';
+import { analyzeComplexity } from '../complexity.js';
+import { getCachedPlannerResult, setCachedPlannerResult } from '../planner-cache.js';
+import { getSubagentManager } from '../subagent.js';
+import { buildSharedContextSnapshot } from '../compactor.js';
+import { maybeGenerateTitle } from '../title-generator.js';
+import type { SubagentTask } from '../subagent.js';
 
 export interface OrchestrationProgress {
   runId: string;
