@@ -37,19 +37,12 @@ export interface OrchestrationDeps {
   emit: OrchestrationEventSink;
 }
 
-/**
- * Try to orchestrate the user request by decomposing it into parallel subtasks
- * handled by subagents. Returns `true` when orchestration ran (caller should
- * stop); `false` when the request falls through to the normal agent loop.
- */
 export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean> {
   const { sessionId, userMessage, model, emit } = deps;
 
   const plannerStart = Date.now();
   const taskPreview = userMessage.slice(0, 120).replace(/\n/g, ' ');
 
-  // Phase 1: deterministic heuristic. If it does not look complex, skip the
-  // LLM round-trip and let the parent loop handle it.
   const heuristic = analyzeComplexity(userMessage);
   if (!heuristic.complex) {
     log.plannerDecision({
@@ -203,8 +196,6 @@ Each subtask description must be self-contained with ALL context needed (file pa
 
     manager.prewarm(analysis.subtasks.length);
 
-    // Phase 2.1: read-only snapshot of the parent session's compacted context
-    // (capped at ~500 tokens), reused across every spawned subagent.
     const sharedContext = buildSharedContextSnapshot(sessionId);
 
     const subtaskDescriptors = analysis.subtasks.map(sub => ({
@@ -402,7 +393,7 @@ Each subtask description must be self-contained with ALL context needed (file pa
     }
 
     const allResultsText = resultLines.filter(Boolean).join('\n\n---\n\n');
-    const fullOutput = `🔀 ${analysis.subtasks.length} subagentes executados (${completed} ok, ${failed} falhas)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
+    const fullOutput = `🔀 ${analysis.subtasks.length} executed subagents (${completed} ok, ${failed} failed)\n\n${allResultsText}${synthesisText ? '\n\n' + synthesisText : ''}`;
     addMessage(sessionId, 'assistant', fullOutput, undefined, undefined, undefined, model);
     emit.done(fullOutput);
     void maybeGenerateTitle(sessionId, model, userMessage, allResultsText.slice(0, 500)).then(title => {

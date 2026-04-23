@@ -16,23 +16,10 @@ export interface GateInput {
   toolName: string;
   args: Record<string, unknown>;
   allowRules: AllowRule[];
-  /** Mutable ref — set to true when the user picks "approve all" for the session. */
   approvedAllForSession: { current: boolean };
   requestApproval: (toolName: string, args: Record<string, unknown>) => Promise<ApprovalResult>;
 }
 
-/**
- * Evaluate a tool call against the session's security policy.
- *
- * Order of checks:
- *   1. Hard blocklist (e.g. `exec` with a blocked command) → 'blocked'.
- *   2. Low/medium risk or already approved-all for session → 'allowed'.
- *   3. Dangerous + matching allow-rule → 'allowed'.
- *   4. Otherwise prompt the user via `requestApproval`:
- *        'deny' → 'denied'
- *        'approve_all' → 'approve_all' (caller flips the ref)
- *        anything else (including 'approve') → 'allowed'
- */
 export async function evaluateToolCall(input: GateInput): Promise<GateOutcome> {
   const { toolName, args, allowRules, approvedAllForSession, requestApproval } = input;
 

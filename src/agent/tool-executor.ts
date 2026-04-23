@@ -10,7 +10,6 @@ export interface ExecutedTool {
   success: boolean;
   resultText: string;
   durationMs: number;
-  /** True when a deterministic retry hint was appended to the error message. */
   deterministicRetryApplied: boolean;
 }
 
@@ -24,12 +23,6 @@ export interface RunToolCallInput {
 const DEFAULT_MAX_RESULT_CHARS = 12000;
 const TRUNCATION_SUFFIX = '\n... [truncated — use offset/limit for large files]';
 
-/**
- * Run a single tool call end-to-end: execute, apply deterministic retry hint
- * on failure, truncate result text to the budget × health factor cap, then
- * sanitize and wrap for boundary safety. Returns everything the caller needs
- * to persist the tool message and emit `tool_result`.
- */
 export async function runToolCall(input: RunToolCallInput): Promise<ExecutedTool> {
   const { toolName, args, budget, health } = input;
 
