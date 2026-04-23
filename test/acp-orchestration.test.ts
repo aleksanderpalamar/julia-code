@@ -172,7 +172,7 @@ vi.mock("../src/context/compaction.js", async (importOriginal) => {
 // --- Imports ---
 
 import { createSession } from "../src/session/manager.js";
-import { runOrchestration, type OrchestrationEventSink } from "../src/agent/orchestrator.js";
+import { runOrchestration, type OrchestrationEventSink } from "../src/agent/orchestrator/index.js";
 
 type SinkCapture = {
   chunks: string[];
@@ -696,7 +696,7 @@ describe("ACP Orchestration Events and DB Persistence", () => {
     });
 
     // Should have emitted orchestration announcement
-    const announcement = chunks.find((c) => c.includes("Tarefa complexa detectada"));
+    const announcement = chunks.find((c) => c.includes("Complex task detected"));
     expect(announcement).toBeDefined();
 
     // Should mention the number of sub-agents
