@@ -2,7 +2,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { App } from './src/tui/app.js';
-import { loadConfig, reloadConfig } from './src/config/index.js';
+import { loadConfig, reloadConfig, getConfig } from './src/config/index.js';
 import { getDb, closeDb } from './src/session/db.js';
 import { initProviders } from './src/providers/registry.js';
 import { initTools } from './src/tools/registry.js';
@@ -11,6 +11,7 @@ import { startGateway } from './src/gateway/server.js';
 import { initMcpServers, shutdownMcpServers } from './src/mcp/index.js';
 import { syncAvailableModels } from './src/config/mcp.js';
 import { cleanupOrphanedWorktrees } from './src/agent/worktree.js';
+import { backfillMissingEmbeddings } from './src/memory/backfill.js';
 
 // Bootstrap
 async function bootstrap() {
@@ -25,7 +26,38 @@ async function bootstrap() {
   await initMcpServers();  // Connect MCP servers and register their tools
 }
 
+const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === 'memory' && cliArgs[1] === 'backfill') {
+  loadConfig();
+  getDb();
+  initProviders();
+  await syncAvailableModels();
+  reloadConfig();
+
+  const result = await backfillMissingEmbeddings({
+    onProgress: (done, total) => {
+      process.stdout.write(`\rbackfill: ${done}/${total}`);
+    },
+  });
+  process.stdout.write('\n');
+  console.log(
+    `backfill done — processed=${result.processed} failed=${result.failed} total=${result.total} aborted=${result.aborted}${result.reason ? ` reason=${result.reason}` : ''}`,
+  );
+  closeDb();
+  process.exit(result.failed > 0 || result.aborted ? 1 : 0);
+}
+
 await bootstrap();
+
+if (getConfig().memorySemantic.enabled && getConfig().memorySemantic.autoBackfillOnStart) {
+  void backfillMissingEmbeddings().then(result => {
+    if (result.aborted || result.failed > 0) {
+      process.stderr.write(
+        `[memory] auto-backfill: processed=${result.processed} failed=${result.failed} reason=${result.reason ?? 'unknown'}\n`,
+      );
+    }
+  });
+}
 
 // Parse CLI args
 const args = process.argv.slice(2);

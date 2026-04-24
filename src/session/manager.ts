@@ -199,6 +199,13 @@ export function getMemoriesWithoutEmbedding(limit = 100): Memory[] {
   ).all(limit) as Memory[];
 }
 
+export function countMemoriesWithoutEmbedding(): number {
+  const row = getDb().prepare(
+    'SELECT COUNT(*) as count FROM memories WHERE embedding IS NULL'
+  ).get() as { count: number };
+  return row.count;
+}
+
 export function getMemory(key: string): Memory | undefined {
   return getDb().prepare('SELECT * FROM memories WHERE key = ?').get(key) as Memory | undefined;
 }

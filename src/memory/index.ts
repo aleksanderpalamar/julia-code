@@ -14,3 +14,5 @@ export { decideGating } from './gating.js';
 export type { GatingConfig } from './gating.js';
 export { prepareMemoryContext, legacyRecentMemoriesBlock } from './pipeline.js';
 export { ensureEmbedding } from './embed-writer.js';
+export { backfillMissingEmbeddings } from './backfill.js';
+export type { BackfillOptions, BackfillResult } from './backfill.js';
