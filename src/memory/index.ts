@@ -10,3 +10,5 @@ export type { EmbeddedMemory, RankedMemory, RankingWeights, GatingDecision } fro
 export { retrieveRelevantMemories } from './retrieval.js';
 export type { RetrievalDeps } from './retrieval.js';
 export { buildContextBlock } from './context-builder.js';
+export { decideGating } from './gating.js';
+export type { GatingConfig } from './gating.js';
