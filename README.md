@@ -166,9 +166,34 @@ When Julia Code starts, it connects to each server and automatically registers t
     "maxConcurrent": 3,
     "subagentMaxIterations": 15,
     "defaultModel": null
+  },
+  "memory": {
+    "semantic": {
+      "enabled": false,
+      "provider": "ollama",
+      "embeddingModel": "nomic-embed-text",
+      "rankingWeights": { "similarity": 0.6, "importance": 0.3, "recency": 0.1 },
+      "recencyHalflifeDays": 30,
+      "maxMemories": 5,
+      "availabilityCheckTtlMs": 30000,
+      "autoBackfillOnStart": false
+    }
   }
 }
 ```
+
+### Semantic memory (optional)
+
+With `memory.semantic.enabled: false` (default), Julia injects the 30 most-recent memories into the system prompt, just like before.
+
+With `memory.semantic.enabled: true`, Julia uses embeddings (via Ollama `nomic-embed-text`) to rank memories by relevance to the current user input. Flow:
+
+1. Pull `nomic-embed-text` once: `ollama pull nomic-embed-text`.
+2. Flip `memory.semantic.enabled` to `true` in `~/.juliacode/settings.json`.
+3. Run `juju memory backfill` to populate embeddings for existing memories.
+4. Set `memory.semantic.autoBackfillOnStart: true` if you want new boots to resume backfilling automatically.
+
+If the embedding provider is unavailable at any point (Ollama down, model missing, request fails), Julia degrades transparently to the legacy recent-memories injection — the app never breaks because of a missing embedding.
 
 ## Architecture
 
