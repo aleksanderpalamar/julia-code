@@ -26,7 +26,7 @@ export function getDb(): Database.Database {
   return _db;
 }
 
-function initSchema(db: Database.Database): void {
+export function initSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -119,6 +119,20 @@ function initSchema(db: Database.Database): void {
 
   if (!msgCols.some(c => c.name === 'model')) {
     db.exec('ALTER TABLE messages ADD COLUMN model TEXT');
+  }
+
+  const memCols = db.pragma('table_info(memories)') as Array<{ name: string }>;
+  if (!memCols.some(c => c.name === 'embedding')) {
+    db.exec('ALTER TABLE memories ADD COLUMN embedding BLOB');
+  }
+  if (!memCols.some(c => c.name === 'embedding_model')) {
+    db.exec('ALTER TABLE memories ADD COLUMN embedding_model TEXT');
+  }
+  if (!memCols.some(c => c.name === 'importance')) {
+    db.exec('ALTER TABLE memories ADD COLUMN importance REAL');
+  }
+  if (!memCols.some(c => c.name === 'last_accessed_at')) {
+    db.exec('ALTER TABLE memories ADD COLUMN last_accessed_at TEXT');
   }
 }
 

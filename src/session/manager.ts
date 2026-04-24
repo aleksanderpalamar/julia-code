@@ -133,21 +133,70 @@ export interface Memory {
   source_session_id: string | null;
   created_at: string;
   updated_at: string;
+  embedding?: Buffer | null;
+  embedding_model?: string | null;
+  importance?: number | null;
+  last_accessed_at?: string | null;
 }
 
-export function saveMemory(key: string, content: string, category = 'general', sourceSessionId?: string): Memory {
+export interface SaveMemoryOptions {
+  sourceSessionId?: string;
+  embedding?: Buffer;
+  embeddingModel?: string;
+  importance?: number;
+}
+
+export function saveMemory(
+  key: string,
+  content: string,
+  category = 'general',
+  sourceSessionIdOrOptions?: string | SaveMemoryOptions,
+): Memory {
+  const opts: SaveMemoryOptions = typeof sourceSessionIdOrOptions === 'string'
+    ? { sourceSessionId: sourceSessionIdOrOptions }
+    : sourceSessionIdOrOptions ?? {};
+
   const db = getDb();
   db.prepare(
-    `INSERT INTO memories (key, content, category, source_session_id)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO memories (key, content, category, source_session_id, embedding, embedding_model, importance)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET
        content = excluded.content,
        category = excluded.category,
        source_session_id = excluded.source_session_id,
+       embedding = COALESCE(excluded.embedding, memories.embedding),
+       embedding_model = COALESCE(excluded.embedding_model, memories.embedding_model),
+       importance = COALESCE(excluded.importance, memories.importance),
        updated_at = datetime('now')`
-  ).run(key, content, category, sourceSessionId ?? null);
+  ).run(
+    key,
+    content,
+    category,
+    opts.sourceSessionId ?? null,
+    opts.embedding ?? null,
+    opts.embeddingModel ?? null,
+    opts.importance ?? null,
+  );
 
   return db.prepare('SELECT * FROM memories WHERE key = ?').get(key) as Memory;
+}
+
+export function updateMemoryEmbedding(key: string, embedding: Buffer, embeddingModel: string): void {
+  getDb().prepare(
+    `UPDATE memories SET embedding = ?, embedding_model = ?, updated_at = datetime('now') WHERE key = ?`,
+  ).run(embedding, embeddingModel, key);
+}
+
+export function getEmbeddedMemories(limit = 500): Memory[] {
+  return getDb().prepare(
+    'SELECT * FROM memories WHERE embedding IS NOT NULL ORDER BY updated_at DESC LIMIT ?'
+  ).all(limit) as Memory[];
+}
+
+export function getMemoriesWithoutEmbedding(limit = 100): Memory[] {
+  return getDb().prepare(
+    'SELECT * FROM memories WHERE embedding IS NULL ORDER BY id ASC LIMIT ?'
+  ).all(limit) as Memory[];
 }
 
 export function getMemory(key: string): Memory | undefined {
