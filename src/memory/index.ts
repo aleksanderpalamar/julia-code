@@ -13,3 +13,4 @@ export { buildContextBlock } from './context-builder.js';
 export { decideGating } from './gating.js';
 export type { GatingConfig } from './gating.js';
 export { prepareMemoryContext, legacyRecentMemoriesBlock } from './pipeline.js';
+export { ensureEmbedding } from './embed-writer.js';
