@@ -246,6 +246,13 @@ export function getRecentMemories(limit = 15): Memory[] {
   ).all(limit) as Memory[];
 }
 
+export function getLatestUserMessage(sessionId: string): string | null {
+  const row = getDb().prepare(
+    "SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1"
+  ).get(sessionId) as { content: string } | undefined;
+  return row?.content ?? null;
+}
+
 export interface OrchestrationRun {
   id: string;
   parent_session_id: string;

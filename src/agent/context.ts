@@ -1,16 +1,17 @@
 import type { ChatMessage } from '../providers/types.js';
-import { getMessages, getLatestCompaction, getRecentMemories, getLastAssistantModel, type Message } from '../session/manager.js';
+import { getMessages, getLatestCompaction, getLatestUserMessage, getLastAssistantModel, type Message } from '../session/manager.js';
 import { loadSkills, loadUserSkills, loadTemperamentSkill } from '../skills/loader.js';
 import { getConfig } from '../config/index.js';
 import { getProjectDir } from '../config/workspace.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { computeBudget, type ContextBudget } from '../context/budget.js';
-import { estimateTokens, estimateMessagesTokens, estimateDbMessageTokens } from '../context/token-counter.js';
+import { estimateMessagesTokens, estimateDbMessageTokens } from '../context/token-counter.js';
 import { extractTaskAnchor, formatTaskAnchor } from '../context/task-anchor.js';
 import { selectMessagesForRetention } from '../context/message-scorer.js';
 import { deserializeCompaction, formatCompactionForContext } from '../context/compaction.js';
 import { assessHealth, getContextWarningMessage, shouldEmergencyCompact, getEmergencyKeepCount } from '../context/health.js';
+import { prepareMemoryContext } from '../memory/pipeline.js';
 
 export interface BuildContextOptions {
   planMode?: boolean;
@@ -61,32 +62,8 @@ export async function buildContext(
     messages.push({ role: 'system', content: formatTaskAnchor(taskAnchorText) });
   }
 
-  const maxMemoryTokens = budget.memories;
-  const allMemories = getRecentMemories(30);   let memoriesSection = '';
-  if (allMemories.length > 0 && maxMemoryTokens > 0) {
-    const memoryLines: string[] = [];
-    let memTokens = 0;
-    for (const m of allMemories) {
-      const line = `- [${m.category}] **${m.key}**: ${m.content}`;
-      const lineTokens = estimateTokens(line);
-      if (memTokens + lineTokens > maxMemoryTokens) break;
-      memoryLines.push(line);
-      memTokens += lineTokens;
-    }
-
-    if (memoryLines.length > 0) {
-      memoriesSection = [
-        `## Your Memories`,
-        `IMPORTANT: ALWAYS check these memories BEFORE executing tools or commands.`,
-        `If the answer to the user's question is already here, respond directly without making tool calls.`,
-        `These are facts you saved from previous sessions:`,
-        ...memoryLines,
-        ``,
-        `Use the \`memory\` tool to save new memories or search for more.`,
-      ].join('\n');
-    }
-  }
-
+  const userInput = getLatestUserMessage(sessionId);
+  const memoriesSection = await prepareMemoryContext(sessionId, userInput, budget.memories);
   if (memoriesSection) {
     messages.push({ role: 'system', content: memoriesSection });
   }
