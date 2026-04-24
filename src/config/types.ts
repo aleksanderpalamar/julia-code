@@ -1,5 +1,31 @@
 import { z } from 'zod';
 
+export const SemanticMemorySchema = z.object({
+  enabled: z.boolean().default(false),
+  provider: z.enum(['ollama', 'null']).default('ollama'),
+  embeddingModel: z.string().default('nomic-embed-text'),
+  rankingWeights: z.object({
+    similarity: z.number().default(0.6),
+    importance: z.number().default(0.3),
+    recency: z.number().default(0.1),
+  }).default({ similarity: 0.6, importance: 0.3, recency: 0.1 }),
+  recencyHalflifeDays: z.number().default(30),
+  maxMemories: z.number().default(5),
+  availabilityCheckTtlMs: z.number().default(30_000),
+  autoBackfillOnStart: z.boolean().default(false),
+}).default({
+  enabled: false,
+  provider: 'ollama',
+  embeddingModel: 'nomic-embed-text',
+  rankingWeights: { similarity: 0.6, importance: 0.3, recency: 0.1 },
+  recencyHalflifeDays: 30,
+  maxMemories: 5,
+  availabilityCheckTtlMs: 30_000,
+  autoBackfillOnStart: false,
+});
+
+export type SemanticMemoryConfig = z.infer<typeof SemanticMemorySchema>;
+
 export const ConfigSchema = z.object({
   ollamaHost: z.string().default('http://localhost:11434'),
   defaultModel: z.string().default('qwen3:8b'),
@@ -21,6 +47,7 @@ export const ConfigSchema = z.object({
   contextReservePercent: z.number().default(0.15),
   contextEmergencyThreshold: z.number().default(0.90),
   contextMaxToolResultTokens: z.number().default(3000),
+  memorySemantic: SemanticMemorySchema,
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -81,6 +108,9 @@ export const SettingsSchema = z.object({
     reservePercent: z.number().default(0.15),
     emergencyThreshold: z.number().default(0.90),
     maxToolResultTokens: z.number().default(3000),
+  }).optional(),
+  memory: z.object({
+    semantic: SemanticMemorySchema.optional(),
   }).optional(),
   mcpServers: z.record(McpServerConfigSchema).optional(),
   security: z.object({

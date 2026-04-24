@@ -89,6 +89,7 @@ export function loadConfig(): Config {
     contextReservePercent: settings?.context?.reservePercent,
     contextEmergencyThreshold: settings?.context?.emergencyThreshold,
     contextMaxToolResultTokens: settings?.context?.maxToolResultTokens,
+    memorySemantic: settings?.memory?.semantic,
   });
 
   if (_config.dbPath && !_config.dbPath.startsWith('/')) {

@@ -1,5 +1,12 @@
 import type { ToolDefinition } from './types.js';
-import { saveMemory, getMemory, searchMemories, listMemories, deleteMemory } from '../session/manager.js';
+import { saveMemory, searchMemories, listMemories, deleteMemory } from '../session/manager.js';
+import { getConfig } from '../config/index.js';
+import { ensureEmbedding } from '../memory/embed-writer.js';
+import {
+  getEmbeddingProvider,
+  isEmbeddingProviderAvailable,
+} from '../memory/embeddings/index.js';
+import { retrieveRelevantMemories } from '../memory/retrieval.js';
 
 let currentSessionId: string | undefined;
 
@@ -35,6 +42,10 @@ export const memoryTool: ToolDefinition = {
         type: 'string',
         description: 'Search query (required for recall)',
       },
+      semantic: {
+        type: 'boolean',
+        description: 'For recall only. true = semantic (embedding-ranked) search; false = keyword (LIKE) search. Defaults to semantic when the embedding provider is available, otherwise keyword.',
+      },
     },
     required: ['action'],
   },
@@ -51,6 +62,11 @@ export const memoryTool: ToolDefinition = {
         }
         const category = (args.category as string) || 'general';
         const memory = saveMemory(key, content, category, currentSessionId);
+
+        if (getConfig().memorySemantic.enabled) {
+          void ensureEmbedding(key);
+        }
+
         return { success: true, output: `Memory saved: [${memory.category}] ${memory.key}` };
       }
 
@@ -60,6 +76,29 @@ export const memoryTool: ToolDefinition = {
           return { success: false, output: '', error: '"query" is required for recall action' };
         }
         const category = args.category as string | undefined;
+        const explicitSemantic = typeof args.semantic === 'boolean' ? (args.semantic as boolean) : undefined;
+
+        const useSemantic = await shouldUseSemantic(explicitSemantic);
+
+        if (useSemantic) {
+          const config = getConfig();
+          const provider = getEmbeddingProvider();
+          const ranked = await retrieveRelevantMemories(query, {
+            provider,
+            weights: config.memorySemantic.rankingWeights,
+            halflifeDays: config.memorySemantic.recencyHalflifeDays,
+            limit: config.memorySemantic.maxMemories,
+          });
+
+          const filtered = category ? ranked.filter(m => m.category === category) : ranked;
+          if (filtered.length > 0) {
+            const lines = filtered.map(m =>
+              `[${m.category}] **${m.key}**: ${m.content} (updated: ${m.updated_at}, score: ${m.score.toFixed(3)})`
+            );
+            return { success: true, output: `${filtered.length} memories found (semantic):\n${lines.join('\n')}` };
+          }
+        }
+
         const memories = searchMemories(query, category);
         if (memories.length === 0) {
           return { success: true, output: 'No memories found matching that query.' };
@@ -98,3 +137,11 @@ export const memoryTool: ToolDefinition = {
     }
   },
 };
+
+async function shouldUseSemantic(explicit: boolean | undefined): Promise<boolean> {
+  if (!getConfig().memorySemantic.enabled) return false;
+  if (explicit === false) return false;
+  const available = await isEmbeddingProviderAvailable();
+  if (!available) return false;
+  return explicit ?? true;
+}
