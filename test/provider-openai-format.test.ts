@@ -55,18 +55,103 @@ describe('toOpenAIMessages', () => {
     expect(out[0].tool_calls?.[0].function.arguments).toBe('raw-string');
   });
 
-  it('maps tool messages to {role:"tool", tool_call_id, content}', () => {
+  it('maps tool messages to {role:"tool", tool_call_id, content} when paired with an assistant tool_call', () => {
     const input: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'tc1', function: { name: 'x', arguments: {} } }],
+      },
       { role: 'tool', content: 'result', tool_call_id: 'tc1' },
     ];
-    expect(toOpenAIMessages(input)).toEqual([
-      { role: 'tool', content: 'result', tool_call_id: 'tc1' },
-    ]);
+    const out = toOpenAIMessages(input);
+    expect(out[1]).toEqual({ role: 'tool', content: 'result', tool_call_id: 'tc1' });
   });
 
   it('handles missing tool_call_id with empty string', () => {
-    const input: ChatMessage[] = [{ role: 'tool', content: 'r' }];
-    expect(toOpenAIMessages(input)[0].tool_call_id).toBe('');
+    const input: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: '', function: { name: 'x', arguments: {} } }],
+      },
+      { role: 'tool', content: 'r' },
+    ];
+    const out = toOpenAIMessages(input);
+    // The assistant has tool_calls with empty id, so the tool message (also
+    // empty id) gets dropped as orphan; we only expect the assistant.
+    expect(out).toHaveLength(1);
+    expect(out[0].role).toBe('assistant');
+  });
+
+  it('drops orphan tool messages whose assistant tool_call was compacted away', () => {
+    const input: ChatMessage[] = [
+      { role: 'user', content: 'hi' },
+      { role: 'tool', content: 'stale result', tool_call_id: 'tc-gone' },
+      { role: 'assistant', content: 'reply' },
+    ];
+    const out = toOpenAIMessages(input);
+    expect(out.map(m => m.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('keeps a tool message when its preceding assistant tool_call matches', () => {
+    const input: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'tc1', function: { name: 'read', arguments: { p: '/x' } } }],
+      },
+      { role: 'tool', content: 'file contents', tool_call_id: 'tc1' },
+    ];
+    const out = toOpenAIMessages(input);
+    expect(out).toHaveLength(2);
+    expect(out[1]).toEqual({ role: 'tool', content: 'file contents', tool_call_id: 'tc1' });
+  });
+
+  it('drops a tool message whose tool_call_id does not match the preceding assistant', () => {
+    const input: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'tc1', function: { name: 'read', arguments: {} } }],
+      },
+      { role: 'tool', content: 'wrong id', tool_call_id: 'tc-other' },
+      { role: 'tool', content: 'right id', tool_call_id: 'tc1' },
+    ];
+    const out = toOpenAIMessages(input);
+    expect(out.map(m => m.tool_call_id)).toEqual([undefined, 'tc1']);
+  });
+
+  it('converts empty assistant content to null when tool_calls are present', () => {
+    const input: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'tc1', function: { name: 'x', arguments: {} } }],
+      },
+      { role: 'tool', content: 'r', tool_call_id: 'tc1' },
+    ];
+    const out = toOpenAIMessages(input);
+    expect(out[0].content).toBeNull();
+  });
+
+  it('keeps non-empty assistant content as-is when tool_calls are present', () => {
+    const input: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: 'reasoning before the call',
+        tool_calls: [{ id: 'tc1', function: { name: 'x', arguments: {} } }],
+      },
+      { role: 'tool', content: 'r', tool_call_id: 'tc1' },
+    ];
+    const out = toOpenAIMessages(input);
+    expect(out[0].content).toBe('reasoning before the call');
+  });
+
+  it('keeps assistant content as empty string (not null) when there are no tool_calls', () => {
+    const input: ChatMessage[] = [{ role: 'assistant', content: '' }];
+    const out = toOpenAIMessages(input);
+    expect(out[0].content).toBe('');
   });
 });
 

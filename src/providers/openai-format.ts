@@ -3,7 +3,7 @@ import type { ChatChunk, ChatMessage, ToolCall, ToolSchema } from './types.js';
 
 export interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | null;
   name?: string;
   tool_call_id?: string;
   tool_calls?: Array<{
@@ -23,7 +23,40 @@ export interface OpenAITool {
 }
 
 export function toOpenAIMessages(messages: ChatMessage[]): OpenAIMessage[] {
-  return messages.map(toOpenAIMessage);
+  const sanitized = sanitizeChatSequence(messages);
+  return sanitized.map(toOpenAIMessage);
+}
+
+function sanitizeChatSequence(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  const announcedIds = new Set<string>();
+
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.tool_calls?.length) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) announcedIds.add(tc.id);
+      }
+      out.push(msg);
+      continue;
+    }
+
+    if (msg.role === 'tool') {
+      const id = msg.tool_call_id;
+      if (!id || !announcedIds.has(id)) {
+        // Orphan tool result — its assistant counterpart was lost during
+        // compaction or retention. Dropping it keeps the OpenAI-compat
+        // validators on Hugging Face happy without losing other context.
+        continue;
+      }
+      announcedIds.delete(id);
+      out.push(msg);
+      continue;
+    }
+
+    out.push(msg);
+  }
+
+  return out;
 }
 
 function toOpenAIMessage(msg: ChatMessage): OpenAIMessage {
@@ -35,13 +68,16 @@ function toOpenAIMessage(msg: ChatMessage): OpenAIMessage {
     };
   }
 
+  const hasToolCalls = !!msg.tool_calls?.length;
+  const content = msg.content ?? '';
+
   const out: OpenAIMessage = {
     role: msg.role,
-    content: msg.content,
+    content: hasToolCalls && content.length === 0 ? null : content,
   };
 
-  if (msg.tool_calls?.length) {
-    out.tool_calls = msg.tool_calls.map(tc => ({
+  if (hasToolCalls) {
+    out.tool_calls = msg.tool_calls!.map(tc => ({
       id: tc.id,
       type: 'function' as const,
       function: {
