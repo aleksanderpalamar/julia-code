@@ -63,6 +63,27 @@ export function clearToolModel(): void {
   });
 }
 
+export function setProvider(provider: 'ollama' | 'huggingface'): void {
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
+    models.provider = provider;
+  });
+}
+
+export function setHuggingfaceToken(token: string): void {
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
+    models.huggingfaceToken = token;
+  });
+}
+
+export function setHuggingfaceBaseUrl(url: string): void {
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
+    models.huggingfaceBaseUrl = url;
+  });
+}
+
 export function getAvailableModels(): Array<{ id: string; name?: string; isCloud?: boolean }> {
   try {
     const raw = readRawSettings();
