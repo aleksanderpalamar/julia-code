@@ -27,7 +27,10 @@ export const SemanticMemorySchema = z.object({
 export type SemanticMemoryConfig = z.infer<typeof SemanticMemorySchema>;
 
 export const ConfigSchema = z.object({
+  provider: z.enum(['ollama', 'huggingface']).default('ollama'),
   ollamaHost: z.string().default('http://localhost:11434'),
+  huggingfaceBaseUrl: z.string().default('https://router.huggingface.co'),
+  huggingfaceToken: z.string().nullable().default(null),
   defaultModel: z.string().default('qwen3:8b'),
   maxToolIterations: z.number().default(25),
   dbPath: z.string().default('./data/julia.db'),
@@ -73,8 +76,10 @@ export const SettingsSchema = z.object({
     version: z.string(),
   }).optional(),
   models: z.object({
-    provider: z.string().default('ollama'),
+    provider: z.enum(['ollama', 'huggingface']).default('ollama'),
     baseUrl: z.string().default('http://localhost:11434'),
+    huggingfaceBaseUrl: z.string().optional(),
+    huggingfaceToken: z.string().optional(),
     default: z.string().default('qwen3:8b'),
     toolModel: z.string().nullable().default(null),
     available: z.array(SettingsModelSchema).default([]),

@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../../providers/types.js';
-import { getProvider } from '../../providers/registry.js';
+import { getActiveProvider } from '../../providers/registry.js';
 import { listOllamaModels } from '../../providers/ollama.js';
 import { log, type PlannerVia } from '../../observability/logger.js';
 import { analyzeComplexity } from '../complexity.js';
@@ -98,7 +98,7 @@ async function runPlannerLLM(
 
   let response = '';
   try {
-    const stream = getProvider('ollama').chat({ model, messages });
+    const stream = getActiveProvider().chat({ model, messages });
     for await (const chunk of stream) {
       if (chunk.type === 'error') {
         process.stderr.write(`[planner] provider error: ${chunk.error}\n`);

@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../providers/types.js';
-import { getProvider } from '../providers/registry.js';
+import { getActiveProvider } from '../providers/registry.js';
 import { getSession, getMessageCount, updateSessionTitle } from '../session/manager.js';
 
 export async function maybeGenerateTitle(
@@ -15,7 +15,7 @@ export async function maybeGenerateTitle(
     const count = getMessageCount(sessionId);
     if (count > 4) return null;
 
-    const provider = getProvider('ollama');
+    const provider = getActiveProvider();
     const messages: ChatMessage[] = [
       {
         role: 'system',

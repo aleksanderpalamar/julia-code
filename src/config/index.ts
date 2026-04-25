@@ -59,8 +59,14 @@ export function loadConfig(): Config {
   const settings = loadSettings();
 
   _config = ConfigSchema.parse({
+    provider: process.env.JULIA_PROVIDER ?? settings?.models?.provider,
     ollamaHost: process.env.OLLAMA_HOST
       ?? settings?.models?.baseUrl,
+    huggingfaceBaseUrl: process.env.HF_BASE_URL
+      ?? settings?.models?.huggingfaceBaseUrl,
+    huggingfaceToken: process.env.HF_TOKEN
+      ?? settings?.models?.huggingfaceToken
+      ?? null,
     defaultModel: process.env.DEFAULT_MODEL
       ?? settings?.models?.default,
     maxToolIterations: process.env.MAX_TOOL_ITERATIONS

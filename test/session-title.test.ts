@@ -40,18 +40,22 @@ vi.mock("../src/session/db.js", () => ({
 
 let mockChatResponse: ChatChunk[] = [];
 
-vi.mock("../src/providers/registry.js", () => ({
-  getProvider: () => ({
+vi.mock("../src/providers/registry.js", () => {
+  const mockProvider = {
     name: "mock-ollama",
     async *chat() {
       for (const chunk of mockChatResponse) {
         yield chunk;
       }
     },
-  }),
-  registerProvider: vi.fn(),
-  initProviders: vi.fn(),
-}));
+  };
+  return {
+    getProvider: () => mockProvider,
+    getActiveProvider: () => mockProvider,
+    registerProvider: vi.fn(),
+    initProviders: vi.fn(),
+  };
+});
 
 vi.mock("../src/tools/registry.js", () => ({
   getToolSchemas: () => [],

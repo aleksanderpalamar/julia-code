@@ -36,8 +36,8 @@ vi.mock("../src/session/db.js", () => ({
 let mockChatResponse: ChatChunk[] = [];
 let capturedChatCalls: Array<{ model: string; messages: unknown[] }> = [];
 
-vi.mock("../src/providers/registry.js", () => ({
-  getProvider: () => ({
+vi.mock("../src/providers/registry.js", () => {
+  const mockProvider = {
     name: "mock-ollama",
     async *chat(params: { model: string; messages: unknown[] }) {
       capturedChatCalls.push(params);
@@ -45,10 +45,14 @@ vi.mock("../src/providers/registry.js", () => ({
         yield chunk;
       }
     },
-  }),
-  registerProvider: vi.fn(),
-  initProviders: vi.fn(),
-}));
+  };
+  return {
+    getProvider: () => mockProvider,
+    getActiveProvider: () => mockProvider,
+    registerProvider: vi.fn(),
+    initProviders: vi.fn(),
+  };
+});
 
 // Track available models for resolution tests
 let mockAvailableModels: string[] = [];

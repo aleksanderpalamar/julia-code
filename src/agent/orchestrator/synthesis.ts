@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../../providers/types.js';
-import { getProvider } from '../../providers/registry.js';
+import { getActiveProvider } from '../../providers/registry.js';
 import { addSessionTokens } from '../../session/manager.js';
 import type { OrchestrationEventSink } from './types.js';
 
@@ -28,7 +28,7 @@ export async function synthesizeFailureReport(deps: SynthesisDeps): Promise<stri
   let text = '';
 
   try {
-    const stream = getProvider('ollama').chat({ model, messages });
+    const stream = getActiveProvider().chat({ model, messages });
 
     for await (const chunk of stream) {
       if (chunk.type === 'text' && chunk.text) {

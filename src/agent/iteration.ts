@@ -2,7 +2,7 @@ import type { ToolCall, TokenUsage, ToolSchema } from '../providers/types.js';
 import type { ContextHealth } from '../context/health.js';
 import type { AllowRule } from '../security/permissions.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
-import { getProvider } from '../providers/registry.js';
+import { getActiveProvider } from '../providers/registry.js';
 import { buildContext } from './context.js';
 import { addMessage, addSessionTokens } from '../session/manager.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount } from '../context/health.js';
@@ -99,7 +99,7 @@ export async function runOneIteration(
 
   let fullText = '';
   const toolCalls: ToolCall[] = [];
-  const provider = getProvider('ollama');
+  const provider = getActiveProvider();
 
   const stream = provider.chat({ model: currentModel, messages, tools: currentTools });
   for await (const chunk of stream) {

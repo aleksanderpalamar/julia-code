@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../providers/types.js';
 import type { Message } from '../session/manager.js';
-import { getProvider } from '../providers/registry.js';
+import { getActiveProvider } from '../providers/registry.js';
 import { estimateTokens } from './token-counter.js';
 
 export interface StructuredCompaction {
@@ -44,7 +44,7 @@ export async function performStructuredCompaction(
   model: string,
   maxOutputTokens?: number,
 ): Promise<StructuredCompaction> {
-  const provider = getProvider('ollama');
+  const provider = getActiveProvider();
 
   const summaryMessages: ChatMessage[] = [];
 

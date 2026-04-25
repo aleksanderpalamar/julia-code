@@ -4,8 +4,8 @@ import type { ChatChunk } from "../src/providers/types.js";
 let mockChatResponse: ChatChunk[] = [];
 let capturedChatCalls: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
 
-vi.mock("../src/providers/registry.js", () => ({
-  getProvider: () => ({
+vi.mock("../src/providers/registry.js", () => {
+  const mockProvider = {
     name: "mock-ollama",
     async *chat(params: { model: string; messages: Array<{ role: string; content: string }> }) {
       capturedChatCalls.push(params);
@@ -13,8 +13,12 @@ vi.mock("../src/providers/registry.js", () => ({
         yield chunk;
       }
     },
-  }),
-}));
+  };
+  return {
+    getProvider: () => mockProvider,
+    getActiveProvider: () => mockProvider,
+  };
+});
 
 let mockAvailableModels: string[] = [];
 vi.mock("../src/providers/ollama.js", () => ({

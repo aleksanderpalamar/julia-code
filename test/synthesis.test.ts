@@ -4,8 +4,8 @@ import type { ChatChunk } from "../src/providers/types.js";
 let mockChatResponse: ChatChunk[] = [];
 let chatThrows: Error | null = null;
 
-vi.mock("../src/providers/registry.js", () => ({
-  getProvider: () => ({
+vi.mock("../src/providers/registry.js", () => {
+  const mockProvider = {
     name: "mock-ollama",
     async *chat() {
       if (chatThrows) throw chatThrows;
@@ -13,8 +13,12 @@ vi.mock("../src/providers/registry.js", () => ({
         yield chunk;
       }
     },
-  }),
-}));
+  };
+  return {
+    getProvider: () => mockProvider,
+    getActiveProvider: () => mockProvider,
+  };
+});
 
 const addSessionTokensMock = vi.fn();
 vi.mock("../src/session/manager.js", () => ({

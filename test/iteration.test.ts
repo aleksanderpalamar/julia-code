@@ -6,14 +6,18 @@ import type { ContextHealth } from '../src/context/health.js';
 
 let chatScript: ChatChunk[] = [];
 
-vi.mock('../src/providers/registry.js', () => ({
-  getProvider: () => ({
+vi.mock('../src/providers/registry.js', () => {
+  const mockProvider = {
     name: 'mock',
     async *chat() {
       for (const c of chatScript) yield c;
     },
-  }),
-}));
+  };
+  return {
+    getProvider: () => mockProvider,
+    getActiveProvider: () => mockProvider,
+  };
+});
 
 vi.mock('../src/agent/context.js', () => ({
   buildContext: vi.fn(async () => ({
