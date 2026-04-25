@@ -16,6 +16,11 @@ const commands: SlashCommand[] = [
     autoTrigger: true,
   },
   {
+    name: "/providers",
+    description: "Switch LLM provider: Ollama / Hugging Face",
+    autoTrigger: true,
+  },
+  {
     name: "/temperament",
     description: "Set temperament: neutral | sharp | warm | auto",
   },

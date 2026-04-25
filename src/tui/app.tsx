@@ -9,6 +9,9 @@ import { TrustPrompt } from "./components/TrustPrompt.js";
 import { ApprovalPrompt, summarizeArgs } from "./components/ApprovalPrompt.js";
 import { BtwInput } from "./components/BtwInput.js";
 import { ModelPicker } from "./components/ModelPicker.js";
+import { ProviderPicker, type ProviderId } from "./components/ProviderPicker.js";
+import { HfTokenInput } from "./components/HfTokenInput.js";
+import { HfModelPrompt } from "./components/HfModelPrompt.js";
 import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
 import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
@@ -32,6 +35,8 @@ import {
   setDefaultModel,
   setToolModel,
   clearToolModel,
+  setProvider,
+  setHuggingfaceToken,
 } from "../config/mcp.js";
 import {
   getMcpServerStatuses,
@@ -62,6 +67,14 @@ export function App({ sessionId }: Props) {
   const [showBtw, setShowBtw] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showToolModelPicker, setShowToolModelPicker] = useState(false);
+
+  type ProviderFlowStep =
+    | { kind: 'idle' }
+    | { kind: 'picking-provider' }
+    | { kind: 'asking-hf-token' }
+    | { kind: 'picking-hf-model' };
+
+  const [providerFlow, setProviderFlow] = useState<ProviderFlowStep>({ kind: 'idle' });
 
   const { pasteInProgress } = useClipboardPaste({
     onImagePasted: (base64, name) => {
@@ -204,11 +217,14 @@ export function App({ sessionId }: Props) {
         return;
       }
 
+      if (text === "/providers") {
+        setProviderFlow({ kind: 'picking-provider' });
+        return;
+      }
+
       if (text === "/model") {
         if (getConfig().provider === 'huggingface') {
-          addSystemEntry(
-            "Provider is Hugging Face. The HF Hub has no free model listing — pass an explicit ID:\n  /model meta-llama/Llama-3.3-70B-Instruct\nor edit models.default in ~/.juliacode/settings.json."
-          );
+          setProviderFlow({ kind: 'picking-hf-model' });
           return;
         }
         setShowModelPicker(true);
@@ -381,6 +397,47 @@ export function App({ sessionId }: Props) {
     setShowToolModelPicker(false);
   }, []);
 
+  const handleProviderSelect = useCallback((next: ProviderId) => {
+    if (next === 'ollama') {
+      const wasHf = getConfig().provider === 'huggingface';
+      setProvider('ollama');
+      reloadConfig();
+      setProviderFlow({ kind: 'idle' });
+      if (wasHf) {
+        addSystemEntry('Provider switched to Ollama. Use /model to pick a local model.');
+      } else {
+        addSystemEntry('Provider is already Ollama.');
+      }
+      return;
+    }
+    if (!getConfig().huggingfaceToken) {
+      setProviderFlow({ kind: 'asking-hf-token' });
+      return;
+    }
+    setProvider('huggingface');
+    reloadConfig();
+    setProviderFlow({ kind: 'picking-hf-model' });
+  }, [addSystemEntry]);
+
+  const handleProviderCancel = useCallback(() => {
+    setProviderFlow({ kind: 'idle' });
+  }, []);
+
+  const handleHfTokenSubmit = useCallback((token: string) => {
+    setHuggingfaceToken(token);
+    setProvider('huggingface');
+    reloadConfig();
+    setProviderFlow({ kind: 'picking-hf-model' });
+  }, []);
+
+  const handleHfModelSubmit = useCallback((modelId: string) => {
+    setDefaultModel(modelId);
+    reloadConfig();
+    setModel(modelId);
+    setProviderFlow({ kind: 'idle' });
+    addSystemEntry(`Provider switched to Hugging Face. Default model: ${modelId}`);
+  }, [addSystemEntry]);
+
   const handleBtwSubmit = useCallback(
     (text: string) => {
       sendBtw(session.id, text);
@@ -476,10 +533,33 @@ export function App({ sessionId }: Props) {
           <BtwInput onSubmit={handleBtwSubmit} onCancel={handleBtwCancel} />
         </Box>
       )}
+      {providerFlow.kind === 'picking-provider' && (
+        <Box paddingX={1}>
+          <ProviderPicker
+            current={getConfig().provider}
+            onSelect={handleProviderSelect}
+            onCancel={handleProviderCancel}
+          />
+        </Box>
+      )}
+      {providerFlow.kind === 'asking-hf-token' && (
+        <Box paddingX={1}>
+          <HfTokenInput onSubmit={handleHfTokenSubmit} onCancel={handleProviderCancel} />
+        </Box>
+      )}
+      {providerFlow.kind === 'picking-hf-model' && (
+        <Box paddingX={1}>
+          <HfModelPrompt
+            current={getConfig().defaultModel || 'meta-llama/Llama-3.3-70B-Instruct'}
+            onSubmit={handleHfModelSubmit}
+            onCancel={handleProviderCancel}
+          />
+        </Box>
+      )}
       <Box paddingX={1} paddingY={0}>
         <Input
           onSubmit={handleSubmit}
-          disabled={isThinking || pendingApproval !== null || showModelPicker || showToolModelPicker}
+          disabled={isThinking || pendingApproval !== null || showModelPicker || showToolModelPicker || providerFlow.kind !== 'idle'}
           model={model}
           isThinking={isThinking}
           tokens={sessionTokens.promptTokens + sessionTokens.completionTokens}
