@@ -10,8 +10,13 @@ vi.mock('../src/config/mcp.js', () => ({
   getAvailableModels: vi.fn(),
 }));
 
+vi.mock('../src/config/index.js', () => ({
+  getConfig: vi.fn(),
+}));
+
 import { supportsTools } from '../src/context/model-info.js';
 import { getAvailableModels } from '../src/config/mcp.js';
+import { getConfig } from '../src/config/index.js';
 
 const toolSchemas: ToolSchema[] = [
   { type: 'function', function: { name: 'read', description: '', parameters: {} } as any },
@@ -20,6 +25,8 @@ const toolSchemas: ToolSchema[] = [
 beforeEach(() => {
   vi.mocked(supportsTools).mockReset();
   vi.mocked(getAvailableModels).mockReset();
+  vi.mocked(getConfig).mockReset();
+  vi.mocked(getConfig).mockReturnValue({ provider: 'ollama' } as ReturnType<typeof getConfig>);
 });
 
 describe('resolveModelPlan', () => {
@@ -64,6 +71,29 @@ describe('resolveModelPlan', () => {
     vi.mocked(supportsTools).mockResolvedValue(false);
 
     const plan = await resolveModelPlan('phi3', 'qwen2.5-coder');
+
+    expect(plan.loopModel).toBe('qwen2.5-coder');
+    expect(plan.hasToolModel).toBe(true);
+  });
+
+  it('ignores configToolModel when active provider is huggingface', async () => {
+    vi.mocked(getConfig).mockReturnValue({ provider: 'huggingface' } as ReturnType<typeof getConfig>);
+    vi.mocked(getAvailableModels).mockReturnValue([]);
+    vi.mocked(supportsTools).mockResolvedValue(true);
+
+    const plan = await resolveModelPlan('meta-llama/Llama-3.3-70B-Instruct', 'deepseek-v3.2:cloud');
+
+    expect(plan.loopModel).toBe('meta-llama/Llama-3.3-70B-Instruct');
+    expect(plan.auxModel).toBe('meta-llama/Llama-3.3-70B-Instruct');
+    expect(plan.hasToolModel).toBe(false);
+  });
+
+  it('still applies configToolModel under the default ollama provider', async () => {
+    vi.mocked(getConfig).mockReturnValue({ provider: 'ollama' } as ReturnType<typeof getConfig>);
+    vi.mocked(getAvailableModels).mockReturnValue([{ id: 'llama3', isCloud: false }]);
+    vi.mocked(supportsTools).mockResolvedValue(false);
+
+    const plan = await resolveModelPlan('llama3', 'qwen2.5-coder');
 
     expect(plan.loopModel).toBe('qwen2.5-coder');
     expect(plan.hasToolModel).toBe(true);

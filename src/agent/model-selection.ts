@@ -13,8 +13,10 @@ export async function resolveModelPlan(
   configToolModel: string | null | undefined,
 ): Promise<ModelPlan> {
   const { getAvailableModels } = await import('../config/mcp.js');
+  const { getConfig } = await import('../config/index.js');
   const requestedIsCloud = getAvailableModels().find(m => m.id === requestedModel)?.isCloud ?? false;
-  const loopModel = (requestedIsCloud ? null : configToolModel) ?? requestedModel;
+  const isNonOllamaProvider = getConfig().provider !== 'ollama';
+  const loopModel = (requestedIsCloud || isNonOllamaProvider ? null : configToolModel) ?? requestedModel;
   const auxModel = requestedModel;
   const hasToolModel = loopModel !== auxModel;
   const localHasTools = await supportsTools(auxModel);
