@@ -205,6 +205,12 @@ export function App({ sessionId }: Props) {
       }
 
       if (text === "/model") {
+        if (getConfig().provider === 'huggingface') {
+          addSystemEntry(
+            "Provider is Hugging Face. The HF Hub has no free model listing — pass an explicit ID:\n  /model meta-llama/Llama-3.3-70B-Instruct\nor edit models.default in ~/.juliacode/settings.json."
+          );
+          return;
+        }
         setShowModelPicker(true);
         return;
       }
@@ -215,11 +221,13 @@ export function App({ sessionId }: Props) {
           addSystemEntry("Usage: /model [name]");
           return;
         }
-        const available = getAvailableModels();
-        const match = available.find(m => m.id === name);
-        if (!match) {
-          addSystemEntry(`Model '${name}' not found. Use /model to see available models.`);
-          return;
+        if (getConfig().provider !== 'huggingface') {
+          const available = getAvailableModels();
+          const match = available.find(m => m.id === name);
+          if (!match) {
+            addSystemEntry(`Model '${name}' not found. Use /model to see available models.`);
+            return;
+          }
         }
         setDefaultModel(name);
         reloadConfig();

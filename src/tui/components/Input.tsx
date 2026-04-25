@@ -8,6 +8,7 @@ import type { AgentMode } from "../types.js";
 import { modeLabel, modeColor } from "../types.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { getBreakpoint } from "../responsive.js";
+import { getConfig } from "../../config/index.js";
 
 interface Props {
   onSubmit: (value: string) => void;
@@ -120,6 +121,11 @@ export function Input({
     onSubmit(trimmed);
   };
 
+  const provider = getConfig().provider;
+  const providerPrefix = provider !== 'ollama'
+    ? (provider === 'huggingface' ? 'hf' : provider)
+    : null;
+
   const displayModel = bp === 'narrow'
     ? null
     : bp === 'medium' && model.length > 20
@@ -136,6 +142,12 @@ export function Input({
       <Box>
         {displayModel && (
           <>
+            {providerPrefix && (
+              <>
+                <Text color="cyan">{providerPrefix}</Text>
+                <Text color="gray"> · </Text>
+              </>
+            )}
             <Text color="yellow">{displayModel}</Text>
             <Text color="gray"> | </Text>
           </>

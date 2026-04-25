@@ -10,6 +10,7 @@ import type { OrchestrationProgress } from "../../agent/loop.js";
 import { modeLabel, modeColor, temperamentLabel, temperamentColor } from "../types.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { getBreakpoint } from "../responsive.js";
+import { getConfig } from "../../config/index.js";
 
 function findPackageVersion(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,7 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
 
   const isWide = bp === 'wide';
   const isNarrow = bp === 'narrow';
+  const provider = getConfig().provider;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -96,6 +98,12 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
 
           <Box marginTop={1}>
             <Text>  </Text>
+            {provider !== 'ollama' && (
+              <>
+                <Text color="cyan">{provider === 'huggingface' ? 'hf' : provider}</Text>
+                <Text color="gray"> · </Text>
+              </>
+            )}
             <Text color="yellow">{model}</Text>
             {toolModel && toolModel !== model && (
               <>
@@ -171,9 +179,19 @@ export function StatusBar({ model, sessionId, isThinking, tokens, mode, temperam
               <Text color="gray"> to manage MCP servers.</Text>
             </Box>
             <Box>
-              <Text color="gray">  Julia uses local models via </Text>
-              <Text color="cyan">Ollama</Text>
-              <Text color="gray">.</Text>
+              {provider === 'huggingface' ? (
+                <>
+                  <Text color="gray">  Julia is talking to </Text>
+                  <Text color="cyan">Hugging Face</Text>
+                  <Text color="gray">.</Text>
+                </>
+              ) : (
+                <>
+                  <Text color="gray">  Julia uses local models via </Text>
+                  <Text color="cyan">Ollama</Text>
+                  <Text color="gray">.</Text>
+                </>
+              )}
             </Box>
           </Box>
 
