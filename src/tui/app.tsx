@@ -58,8 +58,9 @@ export function App({ sessionId }: Props) {
     useAgent(refreshSession);
   const [model, setModel] = useState(() => getConfig().defaultModel);
   const rawConfigToolModel = getConfig().toolModel;
+  const currentProvider = getConfig().provider;
   const currentModelIsCloud = getAvailableModels().find(m => m.id === model)?.isCloud ?? false;
-  const configToolModel = currentModelIsCloud ? null : rawConfigToolModel;
+  const configToolModel = (currentProvider !== 'ollama' || currentModelIsCloud) ? null : rawConfigToolModel;
   const [mode, setMode] = useState<AgentMode>('normal');
   const [temperament, setTemperament] = useState<Temperament>(() => getConfig().defaultTemperament as Temperament);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -253,11 +254,23 @@ export function App({ sessionId }: Props) {
       }
 
       if (text === "/toolmodel") {
+        if (getConfig().provider !== 'ollama') {
+          addSystemEntry(
+            'Tool model is unused while Hugging Face is active. Switch back to Ollama with /providers if you need it.'
+          );
+          return;
+        }
         setShowToolModelPicker(true);
         return;
       }
 
       if (text.startsWith("/toolmodel ")) {
+        if (getConfig().provider !== 'ollama') {
+          addSystemEntry(
+            'Tool model is unused while Hugging Face is active. Switch back to Ollama with /providers if you need it.'
+          );
+          return;
+        }
         const name = text.slice("/toolmodel ".length).trim();
         if (!name) {
           addSystemEntry("Usage: /toolmodel [name|auto]");
