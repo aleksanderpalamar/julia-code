@@ -199,6 +199,10 @@ If the embedding provider is unavailable at any point (Ollama down, model missin
 
 Julia can route the chat loop to the [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers) endpoint instead of Ollama. This is useful when you want to test models that are gated behind a paid Ollama Cloud plan (Kimi-K2, DeepSeek, Llama 3.3, etc.) or when you simply prefer the HF router.
 
+The fastest way to switch is the `/providers` slash command inside Julia: it opens a picker (Ollama / Hugging Face), prompts for your token if it is missing (with a direct link to `https://huggingface.co/settings/tokens`), and then offers a curated list of HF models that support native tool calling. The token is persisted to `~/.juliacode/settings.json` and the `/toolmodel` slash command becomes a no-op while Hugging Face is active, so a stale Ollama tool model never leaks into the HF request.
+
+You can also configure it manually:
+
 ```json
 {
   "models": {
