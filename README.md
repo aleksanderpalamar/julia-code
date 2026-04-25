@@ -195,6 +195,30 @@ With `memory.semantic.enabled: true`, Julia uses embeddings (via Ollama `nomic-e
 
 If the embedding provider is unavailable at any point (Ollama down, model missing, request fails), Julia degrades transparently to the legacy recent-memories injection — the app never breaks because of a missing embedding.
 
+### Hugging Face provider (optional)
+
+Julia can route the chat loop to the [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers) endpoint instead of Ollama. This is useful when you want to test models that are gated behind a paid Ollama Cloud plan (Kimi-K2, DeepSeek, Llama 3.3, etc.) or when you simply prefer the HF router.
+
+```json
+{
+  "models": {
+    "provider": "huggingface",
+    "huggingfaceToken": "hf_xxx",
+    "huggingfaceBaseUrl": "https://router.huggingface.co",
+    "default": "meta-llama/Llama-3.3-70B-Instruct"
+  }
+}
+```
+
+`huggingfaceBaseUrl` is optional and defaults to `https://router.huggingface.co`. The `HF_TOKEN` environment variable overrides `models.huggingfaceToken`, and `JULIA_PROVIDER=huggingface` overrides `models.provider`.
+
+Notes:
+
+- Tool calling is supported natively for modern instruction-tuned models (Llama 3.x, Qwen 2.5/3, DeepSeek-V3, Mistral Large, Kimi-K2). For models without native `tool_calls`, Julia falls back to the same XML/JSON tool-call parsing it uses with Ollama.
+- The HF Hub does not have a free model listing API, so the `/model` slash command in HF mode does not open a picker — pass an explicit ID (`/model meta-llama/Llama-3.3-70B-Instruct`) or edit `models.default` in `settings.json`.
+- Embeddings (`memory.semantic`) still go through Ollama. To use semantic memory together with the HF chat provider, keep Ollama running locally for `nomic-embed-text`.
+- If `provider: "huggingface"` is set but `huggingfaceToken` (or `HF_TOKEN`) is missing, Julia falls back to Ollama and prints a single line on stderr — the app keeps working.
+
 ## Architecture
 
 ```

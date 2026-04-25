@@ -195,6 +195,30 @@ Com `memory.semantic.enabled: true`, a Julia usa embeddings (via Ollama `nomic-e
 
 Se o provider de embedding ficar indisponível a qualquer momento (Ollama offline, modelo faltando, erro de rede), a Julia degrada transparentemente para a injeção legada de memórias recentes — a aplicação nunca quebra por falta de embedding.
 
+### Provider Hugging Face (opcional)
+
+A Julia pode rotear o loop de chat para o endpoint do [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers) em vez do Ollama. Útil quando você quer testar modelos que ficaram bloqueados atrás de assinatura Pro do Ollama Cloud (Kimi-K2, DeepSeek, Llama 3.3, etc.) ou simplesmente prefere o router da HF.
+
+```json
+{
+  "models": {
+    "provider": "huggingface",
+    "huggingfaceToken": "hf_xxx",
+    "huggingfaceBaseUrl": "https://router.huggingface.co",
+    "default": "meta-llama/Llama-3.3-70B-Instruct"
+  }
+}
+```
+
+`huggingfaceBaseUrl` é opcional, default `https://router.huggingface.co`. A variável de ambiente `HF_TOKEN` sobrescreve `models.huggingfaceToken`, e `JULIA_PROVIDER=huggingface` sobrescreve `models.provider`.
+
+Detalhes:
+
+- Tool calling nativo é suportado pela maioria dos modelos instruct modernos (Llama 3.x, Qwen 2.5/3, DeepSeek-V3, Mistral Large, Kimi-K2). Para modelos que não emitem `tool_calls` nativos, a Julia usa o mesmo fallback XML/JSON do Ollama.
+- O HF Hub não tem endpoint gratuito de listagem de modelos, então o comando `/model` no modo HF não abre picker — passe o ID explícito (`/model meta-llama/Llama-3.3-70B-Instruct`) ou edite `models.default` no `settings.json`.
+- Embeddings (`memory.semantic`) continuam via Ollama. Para usar memória semântica junto com o provider HF de chat, mantenha o Ollama rodando localmente para `nomic-embed-text`.
+- Se `provider: "huggingface"` estiver setado mas faltar `huggingfaceToken` (ou `HF_TOKEN`), a Julia cai de volta para Ollama e imprime uma linha no stderr — a aplicação continua funcionando.
+
 ## Arquitetura
 
 ```
