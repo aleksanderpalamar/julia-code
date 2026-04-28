@@ -212,15 +212,36 @@ export function getMemory(key: string): Memory | undefined {
 
 export function searchMemories(query: string, category?: string, limit = 20): Memory[] {
   const db = getDb();
-  const pattern = `%${query}%`;
+  const tokens = tokenizeQuery(query);
+  // Fall back to the raw string when tokenization yields nothing usable
+  // (query was punctuation-only, or all tokens too short).
+  const patterns = tokens.length > 0 ? tokens.map(t => `%${t}%`) : [`%${query}%`];
+
+  const matchClause = patterns.map(() => '(key LIKE ? OR content LIKE ?)').join(' OR ');
+  const params: unknown[] = [];
+  for (const p of patterns) { params.push(p, p); }
+
   if (category) {
     return db.prepare(
-      'SELECT * FROM memories WHERE category = ? AND (key LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT ?'
-    ).all(category, pattern, pattern, limit) as Memory[];
+      `SELECT * FROM memories WHERE category = ? AND (${matchClause}) ORDER BY updated_at DESC LIMIT ?`
+    ).all(category, ...params, limit) as Memory[];
   }
   return db.prepare(
-    'SELECT * FROM memories WHERE key LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT ?'
-  ).all(pattern, pattern, limit) as Memory[];
+    `SELECT * FROM memories WHERE ${matchClause} ORDER BY updated_at DESC LIMIT ?`
+  ).all(...params, limit) as Memory[];
+}
+
+function tokenizeQuery(query: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of query.split(/[^\p{L}\p{N}_-]+/u)) {
+    const t = raw.toLowerCase();
+    if (t.length < 2) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
 }
 
 export function listMemories(category?: string, limit = 20): Memory[] {
