@@ -1,4 +1,5 @@
 import type { SlashCommand } from "./types.js";
+import { loadSkills, loadUserSkills } from "../../skills/loader.js";
 
 const commands: SlashCommand[] = [
   { name: "/clear", description: "Clear conversation history" },
@@ -26,12 +27,31 @@ const commands: SlashCommand[] = [
   { name: "/quit", description: "Exit JuliaCode" },
 ];
 
+export function getInvocableSkillCommands(): SlashCommand[] {
+  const allSkills = [...loadSkills(), ...loadUserSkills()];
+  return allSkills
+    .filter(s => s.frontmatter?.user_invocable === true)
+    .map(s => ({
+      name: `/${s.frontmatter?.name ?? s.name}`,
+      description: s.frontmatter?.description ?? `Invoke skill: ${s.name}`,
+      argumentHint: s.frontmatter?.argument_hint,
+      isSkill: true,
+      skillName: s.name,
+    }));
+}
+
+export function isSkillCommand(name: string): boolean {
+  return getInvocableSkillCommands().some(cmd => cmd.name === name);
+}
+
 export function filterCommands(input: string): SlashCommand[] {
   if (!input.startsWith("/")) return [];
   const prefix = input.toLowerCase();
-  return commands.filter((cmd) => cmd.name.startsWith(prefix));
+  const staticMatches = commands.filter((cmd) => cmd.name.startsWith(prefix));
+  const skillMatches = getInvocableSkillCommands().filter((cmd) => cmd.name.startsWith(prefix));
+  return [...staticMatches, ...skillMatches];
 }
 
 export function getAllCommands(): SlashCommand[] {
-  return commands;
+  return [...commands, ...getInvocableSkillCommands()];
 }

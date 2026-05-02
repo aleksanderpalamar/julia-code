@@ -39,6 +39,8 @@ import {
   removeMcpServer,
 } from "../mcp/manager.js";
 import { getAllMetrics, formatMetricsForDisplay } from "../observability/metrics.js";
+import { getInvocableSkillCommands } from "./commands/registry.js";
+import { loadSkills, loadUserSkills, applyArguments } from "../skills/loader.js";
 
 interface Props {
   sessionId?: string;
@@ -345,6 +347,28 @@ export function App({ sessionId }: Props) {
         setPendingImages([]);
         setPendingImageNames([]);
       }
+
+      if (text.startsWith("/")) {
+        const skillCmds = getInvocableSkillCommands();
+        const skillCmd = skillCmds.find(cmd => text === cmd.name || text.startsWith(cmd.name + " "));
+        if (skillCmd?.skillName) {
+          const args = text.length > skillCmd.name.length
+            ? text.slice(skillCmd.name.length + 1).trim()
+            : "";
+          if (!args) {
+            addSystemEntry(`Usage: ${skillCmd.name} <your request>${skillCmd.argumentHint ? ` (${skillCmd.argumentHint})` : ""}`);
+            return;
+          }
+          const allSkills = [...loadSkills(), ...loadUserSkills()];
+          const skill = allSkills.find(s => s.name === skillCmd.skillName);
+          if (skill) {
+            addSystemEntry(`[Skill ativada: ${skillCmd.skillName}]`);
+            sendMessage(session.id, args, model, mode, imagesToSend, temperament, applyArguments(skill.content, args));
+            return;
+          }
+        }
+      }
+
       sendMessage(session.id, text, model, mode, imagesToSend, temperament);
     },
     [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames, temperament],

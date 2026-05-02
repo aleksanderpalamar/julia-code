@@ -1,3 +1,10 @@
+---
+name: memory
+description: Memory system guidelines — when and how to save, retrieve, and update facts
+always_load: true
+user_invocable: false
+---
+
 # Memory
 
 You have a `memory` tool that lets you persist facts across sessions. Use it proactively.
@@ -33,6 +40,10 @@ Examples:
 
 The pattern is always: **discover → save → respond**. Never say "I don't have that information" when you can find it yourself.
 
+## Immediate Save Rule
+
+CRITICAL: When the user explicitly says "lembre que X", "remember that X", or any equivalent phrase — save it to memory **before** responding. Do not say "I'll remember" without actually calling the memory tool first.
+
 ## When to save memories
 
 - User preferences (language, style, name)
@@ -57,6 +68,10 @@ Use short kebab-case keys: `user-name`, `project-stack`, `user-prefers-ptbr`, `p
 - `project` — about the project (stack, architecture, conventions)
 - `pattern` — learned patterns and corrections
 - `general` — anything else
+
+## Conflict Resolution
+
+If a fact you discover contradicts an existing memory, overwrite the memory with the new fact. Do not keep stale data. The most recently discovered or confirmed fact always wins.
 
 ## End of session
 

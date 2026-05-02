@@ -33,6 +33,7 @@ export interface IterationDeps {
   planMode: boolean;
   temperament: string;
   maxIterations: number;
+  extraSystemContent?: string;
   signal: AbortSignal | undefined;
   /** Mutable across iterations — flipped by the security gate when the user picks "approve all". */
   approvedAllRef: { current: boolean };
@@ -59,7 +60,7 @@ export async function runOneIteration(
 ): Promise<IterationOutcome> {
   const {
     sessionId, plan, toolSchemas, allowRules, planMode, temperament, maxIterations,
-    signal, approvedAllRef, requestApproval, emit,
+    extraSystemContent, signal, approvedAllRef, requestApproval, emit,
   } = deps;
 
   if (signal?.aborted) return { kind: 'aborted' };
@@ -77,7 +78,7 @@ export async function runOneIteration(
   );
 
   const ctx = await buildContext(sessionId, currentModel, {
-    planMode, temperament, iteration, maxIterations,
+    planMode, temperament, iteration, maxIterations, extraSystemContent,
   });
   let messages = ctx.messages;
   const { budget } = ctx;
@@ -90,7 +91,7 @@ export async function runOneIteration(
     const keepCount = getEmergencyKeepCount(currentHealth);
     await performEmergencyCompaction(sessionId, plan.auxModel, keepCount);
     const rebuilt = await buildContext(sessionId, currentModel, {
-      planMode, temperament, iteration, maxIterations,
+      planMode, temperament, iteration, maxIterations, extraSystemContent,
     });
     emit.contextHealth(rebuilt.health);
     messages = rebuilt.messages;
