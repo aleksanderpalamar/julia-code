@@ -18,6 +18,7 @@ export interface BuildContextOptions {
   temperament?: string;
   iteration?: number;
   maxIterations?: number;
+  extraSystemContent?: string;
 }
 
 export interface BuildContextResult {
@@ -233,8 +234,13 @@ function buildSystemPrompt(options?: BuildContextOptions): string {
       : `You have sufficient iterations remaining.`,
   ].join('\n') : '';
 
+  const skillSection = (options?.extraSystemContent && (!options.iteration || options.iteration === 1))
+    ? '\n\n---\n\n## Skill Ativada\n\n' + options.extraSystemContent
+    : '';
+
   return skills.map(s => s.content).join('\n\n---\n\n')
     + (temperamentSkill ? '\n\n---\n\n' + temperamentSkill.content : '')
+    + (skillSection ? skillSection : '')
     + '\n\n---\n\n' + envInfo
     + (planModeSection ? '\n\n---\n\n' + planModeSection : '')
     + (iterationSection ? '\n\n---\n\n' + iterationSection : '')

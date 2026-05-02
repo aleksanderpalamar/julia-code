@@ -78,7 +78,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     this.temperament = t;
   }
 
-  async run(sessionId: string, userMessage: string, model?: string, images?: string[]): Promise<void> {
+  async run(sessionId: string, userMessage: string, model?: string, images?: string[], skillContent?: string): Promise<void> {
     if (this.running) {
       this.emit('error', 'Agent is already running');
       return;
@@ -137,6 +137,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         planMode: this.planMode,
         temperament: this.temperament,
         maxIterations,
+        extraSystemContent: skillContent,
         signal: this.abortController.signal,
         approvedAllRef,
         requestApproval: (n, a) => this.requestApproval(n, a),

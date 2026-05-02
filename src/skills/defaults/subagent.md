@@ -1,3 +1,10 @@
+---
+name: subagent
+description: Subagent spawning and orchestration guidelines
+always_load: true
+user_invocable: false
+---
+
 # Subagents
 
 You can spawn subagents to handle complex tasks in parallel. Each subagent is an independent agent with its own session, context, and tool iteration limit.
@@ -33,3 +40,23 @@ If auto-orchestration didn't trigger but you think subagents would help:
 - Subagents start with a clean session — they don't see your conversation history
 - Different models can be assigned to different subtasks based on complexity
 - When results come back, review them for consistency before presenting to the user
+
+## Context Passing
+
+Each subtask description must be self-contained. Include:
+- Exact file paths to read or modify
+- Relevant code snippets or type signatures the subagent needs to understand
+- Language and framework context (e.g., "TypeScript ESM project, Node 20")
+- Coding conventions to follow (naming, indentation, import style)
+- A clear definition of "done" so the subagent knows when to stop
+
+Do NOT assume subagents have any context from your conversation — write as if briefing someone who just joined the task cold.
+
+## Result Validation
+
+After waiting for subagents, verify before reporting to the user:
+- Did each subtask actually complete the work (not just say it did)?
+- Do results conflict with each other (e.g., two subagents modified the same file differently)?
+- Are there merge conflicts or overlapping changes that need to be reconciled?
+
+If results conflict, resolve them yourself rather than presenting both to the user as options.
