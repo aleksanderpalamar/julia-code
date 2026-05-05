@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
 import { Box, useApp, useInput } from "ink";
 import { Chat } from "./components/Chat.js";
 import { Input } from "./components/Input.js";
@@ -12,35 +10,17 @@ import { ModelPicker } from "./components/ModelPicker.js";
 import { useSession } from "./hooks/useSession.js";
 import { useAgent } from "./hooks/useAgent.js";
 import { useClipboardPaste } from "./hooks/useClipboardPaste.js";
+import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import { getConfig, reloadConfig } from "../config/index.js";
 import { getProjectDir } from "../config/workspace.js";
-import { nextMode, modeLabel, nextTemperament, temperamentLabel } from "./types.js";
+import { nextMode } from "./types.js";
 import type { AgentMode, Temperament } from "./types.js";
+import { isDirectoryTrusted, trustDirectory } from "../config/trust.js";
 import {
-  isDirectoryTrusted,
-  trustDirectory,
-  untrustDirectory,
-  untrustAll,
-  getTrustedDirectories,
-} from "../config/trust.js";
-import {
-  getMcpServerConfigs,
-  addMcpServerConfig,
-  removeMcpServerConfig,
   getAvailableModels,
-  getCurrentModel,
   setDefaultModel,
   setToolModel,
-  clearToolModel,
 } from "../config/mcp.js";
-import {
-  getMcpServerStatuses,
-  addMcpServer,
-  removeMcpServer,
-} from "../mcp/manager.js";
-import { getAllMetrics, formatMetricsForDisplay } from "../observability/metrics.js";
-import { getInvocableSkillCommands } from "./commands/registry.js";
-import { loadSkills, loadUserSkills, applyArguments } from "../skills/loader.js";
 
 interface Props {
   sessionId?: string;
@@ -84,263 +64,30 @@ export function App({ sessionId }: Props) {
     exit();
   }, [exit]);
 
+  const dispatchSlash = useSlashCommands({
+    exit,
+    addSystemEntry,
+    setMode,
+    setTemperament,
+    setModel,
+    setShowModelPicker,
+    setShowToolModelPicker,
+    setPendingImages,
+    setPendingImageNames,
+    setTrusted,
+    projectDir,
+    pendingImageNames,
+    pendingImages,
+    session,
+    model,
+    mode,
+    temperament,
+    sendMessage,
+  });
+
   const handleSubmit = useCallback(
-    (text: string) => {
-      if (text === "/quit" || text === "/exit") {
-        exit();
-        return;
-      }
-
-      if (text === "/clear") {
-        return;
-      }
-
-      if (text === "/stats") {
-        (async () => {
-          try {
-            const metrics = await getAllMetrics();
-            addSystemEntry(formatMetricsForDisplay(metrics));
-          } catch (err) {
-            addSystemEntry(
-              `Failed to compute stats: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        })();
-        return;
-      }
-
-      if (text === "/trust" || text === "/trust list") {
-        const dirs = getTrustedDirectories();
-        if (dirs.length === 0) {
-          addSystemEntry("No trusted directories.");
-        } else {
-          addSystemEntry(
-            "Trusted directories:\n" + dirs.map(d => `  - ${d}`).join("\n")
-          );
-        }
-        return;
-      }
-
-      if (text.startsWith("/trust revoke-all")) {
-        untrustAll();
-        addSystemEntry("All trusted directories have been revoked.");
-        return;
-      }
-
-      if (text.startsWith("/trust revoke ")) {
-        const path = text.slice("/trust revoke ".length).trim();
-        if (!path) {
-          addSystemEntry("Usage: /trust revoke <path>");
-          return;
-        }
-        untrustDirectory(path);
-        addSystemEntry(`Revoked trust for: ${path}`);
-        if (path === projectDir) {
-          setTrusted(false);
-        }
-        return;
-      }
-
-      if (text.startsWith("/trust")) {
-        addSystemEntry(
-          "Usage:\n  /trust             — list trusted dirs\n  /trust revoke <path> — revoke trust\n  /trust revoke-all    — revoke all"
-        );
-        return;
-      }
-
-      if (text === "/mcp" || text === "/mcp list") {
-        const configs = getMcpServerConfigs();
-        const statuses = getMcpServerStatuses();
-        const configNames = Object.keys(configs);
-
-        if (configNames.length === 0) {
-          addSystemEntry("No MCP servers configured.");
-          return;
-        }
-
-        const lines = configNames.map(name => {
-          const status = statuses.find(s => s.name === name);
-          const state = status?.connected ? `connected, ${status.toolCount} tools` : "disconnected";
-          return `  - ${name}: ${state}`;
-        });
-        addSystemEntry("MCP Servers:\n" + lines.join("\n"));
-        return;
-      }
-
-      if (text.startsWith("/mcp add ")) {
-        const parts = text.slice("/mcp add ".length).trim().split(/\s+/);
-        if (parts.length < 2) {
-          addSystemEntry("Usage: /mcp add <name> <command> [args...]");
-          return;
-        }
-        const [name, command, ...args] = parts;
-        const config = { command, args };
-        addMcpServerConfig(name, config);
-        addSystemEntry(`Adding MCP server '${name}'...`);
-        addMcpServer(name, config).then(result => {
-          if (result.success) {
-            addSystemEntry(`MCP server '${name}' connected: ${result.toolCount} tools registered.`);
-          } else {
-            addSystemEntry(`MCP server '${name}' failed to connect: ${result.error}`);
-          }
-        });
-        return;
-      }
-
-      if (text.startsWith("/mcp remove ")) {
-        const name = text.slice("/mcp remove ".length).trim();
-        if (!name) {
-          addSystemEntry("Usage: /mcp remove <name>");
-          return;
-        }
-        removeMcpServer(name);
-        removeMcpServerConfig(name);
-        addSystemEntry(`MCP server '${name}' removed.`);
-        return;
-      }
-
-      if (text.startsWith("/mcp")) {
-        addSystemEntry(
-          "Usage:\n  /mcp             — list servers\n  /mcp add <name> <command> [args...]  — add server\n  /mcp remove <name>  — remove server"
-        );
-        return;
-      }
-
-      if (text === "/model") {
-        setShowModelPicker(true);
-        return;
-      }
-
-      if (text.startsWith("/model ")) {
-        const name = text.slice("/model ".length).trim();
-        if (!name) {
-          addSystemEntry("Usage: /model [name]");
-          return;
-        }
-        const available = getAvailableModels();
-        const match = available.find(m => m.id === name);
-        if (!match) {
-          addSystemEntry(`Model '${name}' not found. Use /model to see available models.`);
-          return;
-        }
-        setDefaultModel(name);
-        reloadConfig();
-        setModel(name);
-        addSystemEntry(`Model switched to: ${name}`);
-        return;
-      }
-
-      if (text === "/toolmodel") {
-        setShowToolModelPicker(true);
-        return;
-      }
-
-      if (text.startsWith("/toolmodel ")) {
-        const name = text.slice("/toolmodel ".length).trim();
-        if (!name) {
-          addSystemEntry("Usage: /toolmodel [name|auto]");
-          return;
-        }
-        if (name === "auto") {
-          clearToolModel();
-          reloadConfig();
-          addSystemEntry("Tool model reset to auto-switch.");
-          return;
-        }
-        const available = getAvailableModels();
-        const match = available.find(m => m.id === name);
-        if (!match) {
-          addSystemEntry(`Model '${name}' not found. Use /toolmodel to see available models.`);
-          return;
-        }
-        setToolModel(name);
-        reloadConfig();
-        addSystemEntry(`Tool model switched to: ${name}`);
-        return;
-      }
-
-      if (text === "/temperament") {
-        setTemperament(prev => {
-          const n = nextTemperament(prev);
-          addSystemEntry(`Temperament: ${temperamentLabel(n) || 'neutral'}`);
-          return n;
-        });
-        return;
-      }
-
-      if (text.startsWith("/temperament ")) {
-        const value = text.slice("/temperament ".length).trim().toLowerCase();
-        const valid: Temperament[] = ['neutral', 'sharp', 'warm', 'auto'];
-        if (!valid.includes(value as Temperament)) {
-          addSystemEntry(`Invalid temperament '${value}'. Valid: ${valid.join(', ')}`);
-          return;
-        }
-        setTemperament(value as Temperament);
-        addSystemEntry(`Temperament: ${temperamentLabel(value as Temperament) || 'neutral'}`);
-        return;
-      }
-
-      if (text === "/mode") {
-        setMode(prev => {
-          const n = nextMode(prev);
-          addSystemEntry(`Mode: ${modeLabel(n) || 'normal'}`);
-          return n;
-        });
-        return;
-      }
-
-      if (text === "/image list") {
-        if (pendingImageNames.length === 0) {
-          addSystemEntry("No images attached.");
-        } else {
-          const lines = pendingImageNames.map((name, i) => `  [Image #${i + 1}] ${name}`);
-          addSystemEntry("Pending images:\n" + lines.join("\n"));
-        }
-        return;
-      }
-
-      if (text === "/image clear") {
-        setPendingImages([]);
-        setPendingImageNames([]);
-        addSystemEntry("All pending images cleared.");
-        return;
-      }
-
-      if (text.startsWith("/image ")) {
-        const imgPath = text.slice("/image ".length).trim();
-        if (!imgPath) {
-          addSystemEntry("Usage: /image <path> | list | clear");
-          return;
-        }
-        try {
-          const VALID_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
-          const resolved = resolve(imgPath);
-          const ext = resolved.toLowerCase().slice(resolved.lastIndexOf('.'));
-          if (!VALID_EXTENSIONS.includes(ext)) {
-            addSystemEntry(`Invalid image format '${ext}'. Supported: ${VALID_EXTENSIONS.join(', ')}`);
-            return;
-          }
-          const stat = statSync(resolved);
-          const MAX_SIZE = 10 * 1024 * 1024;           if (stat.size > MAX_SIZE) {
-            addSystemEntry(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max: 10MB`);
-            return;
-          }
-          const base64 = readFileSync(resolved).toString('base64');
-          const fileName = resolved.split('/').pop() ?? imgPath;
-          setPendingImages(prev => [...prev, base64]);
-          setPendingImageNames(prev => [...prev, fileName]);
-          const count = pendingImages.length + 1;
-          addSystemEntry(`[Image #${count}] attached: ${fileName}`);
-        } catch (err) {
-          addSystemEntry(`Failed to read image: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        return;
-      }
-
-      if (text === "/image") {
-        addSystemEntry("Usage: /image <path> | list | clear");
-        return;
-      }
+    async (text: string) => {
+      if (await dispatchSlash(text)) return;
 
       const imagesToSend = pendingImages.length > 0 ? [...pendingImages] : undefined;
       if (imagesToSend) {
@@ -348,30 +95,9 @@ export function App({ sessionId }: Props) {
         setPendingImageNames([]);
       }
 
-      if (text.startsWith("/")) {
-        const skillCmds = getInvocableSkillCommands();
-        const skillCmd = skillCmds.find(cmd => text === cmd.name || text.startsWith(cmd.name + " "));
-        if (skillCmd?.skillName) {
-          const args = text.length > skillCmd.name.length
-            ? text.slice(skillCmd.name.length + 1).trim()
-            : "";
-          if (!args) {
-            addSystemEntry(`Usage: ${skillCmd.name} <your request>${skillCmd.argumentHint ? ` (${skillCmd.argumentHint})` : ""}`);
-            return;
-          }
-          const allSkills = [...loadSkills(), ...loadUserSkills()];
-          const skill = allSkills.find(s => s.name === skillCmd.skillName);
-          if (skill) {
-            addSystemEntry(`[Skill ativada: ${skillCmd.skillName}]`);
-            sendMessage(session.id, args, model, mode, imagesToSend, temperament, applyArguments(skill.content, args));
-            return;
-          }
-        }
-      }
-
       sendMessage(session.id, text, model, mode, imagesToSend, temperament);
     },
-    [session.id, model, sendMessage, exit, projectDir, addSystemEntry, pendingImages, pendingImageNames, temperament],
+    [dispatchSlash, pendingImages, sendMessage, session.id, model, mode, temperament],
   );
 
   const handleModelSelect = useCallback((modelId: string) => {

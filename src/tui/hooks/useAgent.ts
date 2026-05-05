@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AgentLoop } from '../../agent/loop.js';
-import type { OrchestrationProgress } from '../../agent/loop.js';
+import type { AgentEvents, OrchestrationProgress } from '../../agent/loop.js';
 import { AgentQueue } from '../../agent/queue.js';
 import { addMessage } from '../../session/manager.js';
 import type { ChatEntry } from '../components/Chat.js';
@@ -146,38 +146,39 @@ export function useAgent(onSessionChanged?: () => void) {
       }]);
     };
 
-    agent.on('thinking', onThinking);
-    agent.on('chunk', onChunk);
-    agent.on('tool_call', onToolCall);
-    agent.on('tool_result', onToolResult);
-    agent.on('compacting', onCompacting);
-    agent.on('approval_needed', onApprovalNeeded);
-    agent.on('usage', onUsage);
-    agent.on('title', onTitle);
-    agent.on('model_switch', onModelSwitch);
-    agent.on('clear_streaming', onClearStreaming);
-    agent.on('orchestration_progress', onOrchestrationProgress);
-    agent.on('subagent_chunk', onSubagentChunk);
-    agent.on('subagent_status', onSubagentStatus);
-    agent.on('done', onDone);
-    agent.on('error', onError);
+    const handlers: Partial<{
+      [K in keyof AgentEvents]: (...args: AgentEvents[K]) => void;
+    }> = {
+      thinking: onThinking,
+      chunk: onChunk,
+      tool_call: onToolCall,
+      tool_result: onToolResult,
+      compacting: onCompacting,
+      approval_needed: onApprovalNeeded,
+      usage: onUsage,
+      title: onTitle,
+      model_switch: onModelSwitch,
+      clear_streaming: onClearStreaming,
+      orchestration_progress: onOrchestrationProgress,
+      subagent_chunk: onSubagentChunk,
+      subagent_status: onSubagentStatus,
+      done: onDone,
+      error: onError,
+    };
+
+    const entries = Object.entries(handlers) as [
+      keyof AgentEvents,
+      (...args: any[]) => void,
+    ][];
+
+    for (const [event, handler] of entries) {
+      agent.on(event, handler as never);
+    }
 
     return () => {
-      agent.off('thinking', onThinking);
-      agent.off('chunk', onChunk);
-      agent.off('tool_call', onToolCall);
-      agent.off('tool_result', onToolResult);
-      agent.off('compacting', onCompacting);
-      agent.off('approval_needed', onApprovalNeeded);
-      agent.off('model_switch', onModelSwitch);
-      agent.off('clear_streaming', onClearStreaming);
-      agent.off('orchestration_progress', onOrchestrationProgress);
-      agent.off('subagent_chunk', onSubagentChunk);
-      agent.off('subagent_status', onSubagentStatus);
-      agent.off('usage', onUsage);
-      agent.off('title', onTitle);
-      agent.off('done', onDone);
-      agent.off('error', onError);
+      for (const [event, handler] of entries) {
+        agent.off(event, handler as never);
+      }
     };
   }, [agent]);
 

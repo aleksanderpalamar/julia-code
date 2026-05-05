@@ -29,44 +29,38 @@ interface Props {
   streamingText: string;
 }
 
+const entryRenderers: Record<ChatEntry['type'], (e: ChatEntry) => React.ReactElement> = {
+  user: (e) => <Text color="blue" bold>{'> '}{e.content}</Text>,
+  btw: (e) => (
+    <Text color="blue" bold>{'> '}<Text color="cyan">[btw] </Text>{e.content}</Text>
+  ),
+  assistant: (e) => <Markdown content={e.content} />,
+  tool_call: (e) => (
+    <Text color="yellow" dimColor>⚡ {formatToolCall(e.toolName!, e.toolArgs)}</Text>
+  ),
+  tool_result: (e) => (
+    <ToolOutput
+      name={e.toolName ?? 'unknown'}
+      output={e.content}
+      success={e.toolSuccess ?? true}
+    />
+  ),
+  error: (e) => <Text color="red">Error: {e.content}</Text>,
+  subagent_stream: (e) => (
+    <Box flexDirection="column">
+      <Text color="cyan" dimColor bold>[{e.subagentLabel ?? 'subagent'}]</Text>
+      <Text dimColor>{e.content}</Text>
+    </Box>
+  ),
+  system: (e) => <Text color="gray">{e.content}</Text>,
+};
+
 export function Chat({ entries, streamingText }: Props) {
   return (
     <Box flexDirection="column" flexGrow={1}>
       {entries.map((entry, i) => (
         <Box key={i} flexDirection="column" marginBottom={entry.type === 'tool_result' ? 0 : 1}>
-          {entry.type === 'user' && (
-            <>
-              <Text color="blue" bold>{'> '}{entry.content}</Text>
-            </>
-          )}
-          {entry.type === 'btw' && (
-            <Text color="blue" bold>{'> '}<Text color="cyan">[btw] </Text>{entry.content}</Text>
-          )}
-          {entry.type === 'assistant' && (
-            <Markdown content={entry.content} />
-          )}
-          {entry.type === 'tool_call' && (
-            <Text color="yellow" dimColor>⚡ {formatToolCall(entry.toolName!, entry.toolArgs)}</Text>
-          )}
-          {entry.type === 'tool_result' && (
-            <ToolOutput
-              name={entry.toolName ?? 'unknown'}
-              output={entry.content}
-              success={entry.toolSuccess ?? true}
-            />
-          )}
-          {entry.type === 'error' && (
-            <Text color="red">Error: {entry.content}</Text>
-          )}
-          {entry.type === 'subagent_stream' && (
-            <Box flexDirection="column">
-              <Text color="cyan" dimColor bold>[{entry.subagentLabel ?? 'subagent'}]</Text>
-              <Text dimColor>{entry.content}</Text>
-            </Box>
-          )}
-          {entry.type === 'system' && (
-            <Text color="gray">{entry.content}</Text>
-          )}
+          {entryRenderers[entry.type](entry)}
         </Box>
       ))}
       {streamingText && (
