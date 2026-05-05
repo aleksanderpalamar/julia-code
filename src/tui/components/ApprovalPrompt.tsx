@@ -86,23 +86,22 @@ export function ApprovalPrompt({ toolName, argsSummary, onResult }: Props) {
   );
 }
 
+const summarizers: Record<string, (args: Record<string, unknown>) => string> = {
+  exec: (a) => String(a.command ?? "").slice(0, 120),
+  write: (a) => `path: ${a.path ?? "?"} (${String(a.content ?? "").length} chars)`,
+  edit: (a) => `path: ${a.path ?? "?"}`,
+  fetch: (a) => `${a.method ?? "GET"} ${a.url ?? "?"}`,
+};
+
+const defaultSummarizer = (args: Record<string, unknown>): string =>
+  Object.entries(args)
+    .slice(0, 3)
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 50)}`)
+    .join(", ");
+
 export function summarizeArgs(
   toolName: string,
   args: Record<string, unknown>,
 ): string {
-  switch (toolName) {
-    case "exec":
-      return String(args.command ?? "").slice(0, 120);
-    case "write":
-      return `path: ${args.path ?? "?"} (${String(args.content ?? "").length} chars)`;
-    case "edit":
-      return `path: ${args.path ?? "?"}`;
-    case "fetch":
-      return `${args.method ?? "GET"} ${args.url ?? "?"}`;
-    default:
-      return Object.entries(args)
-        .slice(0, 3)
-        .map(([k, v]) => `${k}: ${String(v).slice(0, 50)}`)
-        .join(", ");
-  }
+  return (summarizers[toolName] ?? defaultSummarizer)(args);
 }
