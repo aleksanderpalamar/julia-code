@@ -1,9 +1,9 @@
 import { executeTool } from '../tools/registry.js';
-import { computeToolResultCap, type ContextBudget } from '../context/budget.js';
-import { getToolResultCapFactor, type ContextHealth } from '../context/health.js';
-import { sanitizeToolResult } from '../security/sanitize.js';
-import { wrapToolResult } from '../security/boundaries.js';
+import { type ContextBudget } from '../context/budget.js';
+import { type ContextHealth } from '../context/health.js';
 import { maybeDeterministicRetry } from './retry.js';
+import { computeResultLimit } from './tool-execution/result-limiter.js';
+import { processToolResult } from './tool-execution/result-processor.js';
 
 export interface ExecutedTool {
   toolName: string;
@@ -19,9 +19,6 @@ export interface RunToolCallInput {
   budget: ContextBudget | null;
   health: ContextHealth;
 }
-
-const DEFAULT_MAX_RESULT_CHARS = 12000;
-const TRUNCATION_SUFFIX = '\n... [truncated — use offset/limit for large files]';
 
 export async function runToolCall(input: RunToolCallInput): Promise<ExecutedTool> {
   const { toolName, args, budget, health } = input;
@@ -40,22 +37,12 @@ export async function runToolCall(input: RunToolCallInput): Promise<ExecutedTool
     }
   }
 
-  let resultText = result.success
+  const rawText = result.success
     ? result.output
     : `Error: ${errorWithHint}\n${result.output}`;
 
-  let maxResultChars = DEFAULT_MAX_RESULT_CHARS;
-  if (budget) {
-    maxResultChars = computeToolResultCap(budget, toolName);
-    const capFactor = getToolResultCapFactor(health);
-    maxResultChars = Math.floor(maxResultChars * capFactor);
-  }
-  if (resultText.length > maxResultChars) {
-    resultText = resultText.slice(0, maxResultChars) + TRUNCATION_SUFFIX;
-  }
-
-  resultText = sanitizeToolResult(resultText);
-  resultText = wrapToolResult(toolName, resultText);
+  const maxChars = computeResultLimit(toolName, budget, health);
+  const resultText = processToolResult(rawText, toolName, maxChars);
 
   return {
     toolName,
