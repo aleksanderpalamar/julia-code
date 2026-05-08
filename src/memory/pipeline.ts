@@ -50,7 +50,18 @@ export function legacyRecentMemoriesBlock(budgetTokens: number): string {
   if (budgetTokens <= 0) return '';
 
   const allMemories = getRecentMemories(30);
-  if (allMemories.length === 0) return '';
+
+  if (allMemories.length === 0) {
+    return [
+      `## Your Memories`,
+      `(no saved memories yet for this user)`,
+      ``,
+      `When the user asks identity questions ("quem sou eu?", "do you know who I am?")`,
+      `do NOT say "I have no memory" — either call \`memory\` action=recall to`,
+      `double-check, or invite the user to share so you can save it via`,
+      `\`memory\` action=save.`,
+    ].join('\n');
+  }
 
   const memoryLines: string[] = [];
   let memTokens = 0;
@@ -62,7 +73,13 @@ export function legacyRecentMemoriesBlock(budgetTokens: number): string {
     memTokens += lineTokens;
   }
 
-  if (memoryLines.length === 0) return '';
+  if (memoryLines.length === 0) {
+    return [
+      `## Your Memories`,
+      `(${allMemories.length} memories exist but none fit the current budget)`,
+      `Use \`memory\` action=recall with a focused query to retrieve specific facts.`,
+    ].join('\n');
+  }
 
   return [
     `## Your Memories`,

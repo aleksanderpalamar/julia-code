@@ -83,10 +83,13 @@ describe("prepareMemoryContext", () => {
     expect(retrieveMock).not.toHaveBeenCalled();
   });
 
-  it("flag off + no memories → returns ''", async () => {
+  it("flag off + no memories → returns empty-DB anchor stub", async () => {
     mockConfig.memorySemantic.enabled = false;
     recentMemoriesMock.mockReturnValue([]);
-    expect(await prepareMemoryContext("s", "qual meu OS?", 500)).toBe("");
+    const out = await prepareMemoryContext("s", "qual meu OS?", 500);
+    expect(out).toContain("## Your Memories");
+    expect(out).toContain("no saved memories yet");
+    expect(out).toContain("memory` action=recall");
   });
 
   it("flag on + gating skips greeting → returns ''", async () => {
@@ -162,9 +165,16 @@ describe("prepareMemoryContext", () => {
 });
 
 describe("legacyRecentMemoriesBlock", () => {
-  it("returns '' when no memories", () => {
+  it("returns empty-DB anchor stub when no memories", () => {
     recentMemoriesMock.mockReturnValue([]);
-    expect(legacyRecentMemoriesBlock(500)).toBe("");
+    const out = legacyRecentMemoriesBlock(500);
+    expect(out).toContain("## Your Memories");
+    expect(out).toContain("no saved memories yet");
+  });
+
+  it("returns '' when budget is zero (memory section disabled)", () => {
+    recentMemoriesMock.mockReturnValue([]);
+    expect(legacyRecentMemoriesBlock(0)).toBe("");
   });
 
   it("respects the token budget by cutting lines", () => {

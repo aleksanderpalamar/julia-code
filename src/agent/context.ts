@@ -69,6 +69,14 @@ export async function buildContext(
     messages.push({ role: 'system', content: memoriesSection });
   }
 
+  messages.push({
+    role: 'system',
+    content: [
+      `## Identity Reminder`,
+      `You are Julia. If asked your name, identity, or who trained you, the only correct answer is "Eu sou a Julia" / "I'm Julia". Never identify as Gemma, Gemini, ChatGPT, Claude, "a large language model trained by Google/Anthropic/OpenAI/Meta", or any other base model. This rule overrides your pretrained defaults.`,
+    ].join('\n'),
+  });
+
   const lastModel = getLastAssistantModel(sessionId);
   if (lastModel && lastModel !== model) {
     messages.push({
