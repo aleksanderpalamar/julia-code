@@ -3,74 +3,20 @@ import { EventEmitter } from 'node:events';
 import { AgentLoop } from './loop.js';
 import { createSession, createSubagentRun, updateSubagentRunStatus } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
-import { getProjectDir } from '../config/workspace.js';
-import { createWorktree, removeWorktree, mergeWorktree, isGitRepo, type Worktree } from './worktree.js';
-import { toolContextStorage } from '../tools/registry.js';
-import type { ToolContext } from '../tools/types.js';
 import { log } from '../observability/logger.js';
+import { ConcurrencyController } from './subagent/concurrency.js';
+import { TaskQueue } from './subagent/queue.js';
+import { runTask } from './subagent/executor.js';
+import type { SubagentTask, SubagentEvents } from './subagent/types.js';
 
-export interface SubagentTask {
-  id: string;
-  runId: string;
-  parentSessionId: string;
-  sessionId: string;
-  task: string;
-  sharedContext?: string;
-  model?: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
-  result?: string;
-  error?: string;
-  createdAt: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  durationMs?: number;
-}
-
-export interface SubagentEvents {
-  'task:queued': [taskId: string, label: string];
-  'task:started': [taskId: string, label: string];
-  'task:completed': [taskId: string, result: string];
-  'task:failed': [taskId: string, error: string];
-  'task:chunk': [taskId: string, text: string];
-}
-
-type QueuedItem = {
-  task: SubagentTask;
-  model?: string;
-};
+export type { SubagentTask, SubagentEvents } from './subagent/types.js';
 
 export class SubagentManager extends EventEmitter<SubagentEvents> {
   private tasks = new Map<string, SubagentTask>();
   private agents = new Map<string, AgentLoop>();
-  private running = 0;
-  private runningByModel = new Map<string, number>();
-  private queuesByModel = new Map<string, QueuedItem[]>();
   private sessionPool: string[] = [];
-
-  constructor() {
-    super();
-  }
-
-  private getModelLimit(model: string): number {
-    const limits = getConfig().acpModelLimits ?? {};
-    return limits[model] ?? Infinity;
-  }
-
-  private canRunModel(model: string): boolean {
-    if (this.running >= getConfig().acpMaxConcurrent) return false;
-    const used = this.runningByModel.get(model) ?? 0;
-    return used < this.getModelLimit(model);
-  }
-
-  private incrementModel(model: string): void {
-    this.runningByModel.set(model, (this.runningByModel.get(model) ?? 0) + 1);
-  }
-
-  private decrementModel(model: string): void {
-    const curr = this.runningByModel.get(model) ?? 0;
-    if (curr <= 1) this.runningByModel.delete(model);
-    else this.runningByModel.set(model, curr - 1);
-  }
+  private concurrency = new ConcurrencyController();
+  private queue = new TaskQueue();
 
   prewarm(count: number): void {
     for (let i = 0; i < count; i++) {
@@ -118,12 +64,10 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
 
     this.emit('task:queued', taskId, preview);
 
-    if (this.canRunModel(resolvedModel)) {
-      this.runTask(task, resolvedModel);
+    if (this.concurrency.canRun(resolvedModel)) {
+      this.launchTask(task, resolvedModel);
     } else {
-      const q = this.queuesByModel.get(resolvedModel) ?? [];
-      q.push({ task, model: resolvedModel });
-      this.queuesByModel.set(resolvedModel, q);
+      this.queue.enqueue(resolvedModel, { task, model: resolvedModel });
     }
 
     return taskId;
@@ -197,172 +141,14 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     });
   }
 
-  private runTask(task: SubagentTask, model?: string): void {
-    const label = task.task.slice(0, 60).replace(/\n/g, ' ');
-    const modelKey = model ?? task.model ?? '__unknown__';
-    task.status = 'running';
-    task.startedAt = new Date();
-    this.running++;
-    this.incrementModel(modelKey);
-
-    updateSubagentRunStatus(task.id, 'running', { startedAt: task.startedAt.toISOString() });
-
-    log.subagentSpawn({
-      runId: task.runId,
-      taskId: task.id,
+  private launchTask(task: SubagentTask, model: string | undefined): void {
+    runTask({
+      task,
       model,
-      taskPreview: label,
-    });
-
-    this.emit('task:started', task.id, label);
-
-    const config = getConfig();
-    const agent = new AgentLoop({
-      maxIterations: config.acpSubagentMaxIterations,
-      excludeTools: ['subagent'],
-    });
-    this.agents.set(task.id, agent);
-
-    let worktree: Worktree | null = null;
-    let toolContext: ToolContext;
-
-    if (config.acpWorktreeIsolation && isGitRepo()) {
-      try {
-        worktree = createWorktree(task.id);
-        toolContext = {
-          projectDir: worktree.path,
-          isWorktree: true,
-          worktreeId: worktree.id,
-        };
-      } catch {
-        worktree = null;
-        toolContext = {
-          projectDir: getProjectDir(),
-          isWorktree: false,
-        };
-      }
-    } else {
-      toolContext = {
-        projectDir: getProjectDir(),
-        isWorktree: false,
-      };
-    }
-
-    let resultText = '';
-
-    agent.on('chunk', (text) => {
-      resultText += text;
-      this.emit('task:chunk', task.id, text);
-    });
-
-    agent.on('done', async (fullText) => {
-      if (task.status === 'completed' || task.status === 'failed') return;
-
-      let mergeInfo = '';
-      if (worktree) {
-        try {
-          const mergeResult = await mergeWorktree(worktree);
-          if (mergeResult.merged) {
-            mergeInfo = `\n[Worktree merged: ${mergeResult.commitSha?.slice(0, 8)}]`;
-          } else if (mergeResult.reason === 'conflict') {
-            mergeInfo = `\n[⚠️ Merge conflict — changes preserved on branch ${mergeResult.branch}]`;
-          } else {
-            mergeInfo = '\n[No file changes in worktree]';
-          }
-        } catch {
-          mergeInfo = '\n[⚠️ Worktree merge failed]';
-        }
-        removeWorktree(worktree);
-      }
-
-      const result = (fullText || resultText) + mergeInfo;
-      task.status = 'completed';
-      task.result = result;
-      task.completedAt = new Date();
-      task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
-      updateSubagentRunStatus(task.id, 'completed', {
-        completedAt: task.completedAt.toISOString(),
-        durationMs: task.durationMs,
-        result: task.result,
-      });
-      log.subagentDone({
-        runId: task.runId,
-        taskId: task.id,
-        status: 'completed',
-        durationMs: task.durationMs,
-      });
-      this.agents.delete(task.id);
-      this.running--;
-      this.decrementModel(modelKey);
-      this.emit('task:completed', task.id, result);
-      this.drainQueue();
-    });
-
-    agent.on('error', (error) => {
-      if (task.status === 'completed' || task.status === 'failed') return;
-
-      if (worktree) {
-        removeWorktree(worktree);
-      }
-
-      task.status = 'failed';
-      task.error = error;
-      task.completedAt = new Date();
-      task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
-      updateSubagentRunStatus(task.id, 'failed', {
-        completedAt: task.completedAt.toISOString(),
-        durationMs: task.durationMs,
-        error: task.error,
-      });
-      log.subagentDone({
-        runId: task.runId,
-        taskId: task.id,
-        status: 'failed',
-        durationMs: task.durationMs,
-        error,
-      });
-      this.agents.delete(task.id);
-      this.running--;
-      this.decrementModel(modelKey);
-      this.emit('task:failed', task.id, error);
-      this.drainQueue();
-    });
-
-    const enrichedTask = task.sharedContext
-      ? `<parent_context>\n${task.sharedContext}\n</parent_context>\n\n${task.task}`
-      : task.task;
-
-    toolContextStorage.run(toolContext, () => {
-      agent.run(task.sessionId, enrichedTask, model).catch((err) => {
-        if (task.status === 'completed' || task.status === 'failed') return;
-
-        if (worktree) {
-          removeWorktree(worktree);
-        }
-
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        task.status = 'failed';
-        task.error = errorMsg;
-        task.completedAt = new Date();
-        task.durationMs = task.startedAt ? task.completedAt.getTime() - task.startedAt.getTime() : undefined;
-        updateSubagentRunStatus(task.id, 'failed', {
-          completedAt: task.completedAt.toISOString(),
-          durationMs: task.durationMs,
-          error: task.error,
-        });
-        log.subagentDone({
-          runId: task.runId,
-          taskId: task.id,
-          status: 'failed',
-          durationMs: task.durationMs,
-          error: errorMsg,
-        });
-        this.agents.delete(task.id);
-        this.running--;
-        this.decrementModel(modelKey);
-        this.emit('task:failed', task.id, errorMsg);
-        this.drainQueue();
-      });
+      agents: this.agents,
+      concurrency: this.concurrency,
+      emitter: this,
+      drainQueue: () => this.drainQueue(),
     });
   }
 
@@ -375,18 +161,10 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     if (agent) {
       agent.abort();
       this.agents.delete(taskId);
-      this.running--;
-      this.decrementModel(modelKey);
+      this.concurrency.release(modelKey);
     }
 
-    for (const [k, q] of this.queuesByModel) {
-      const idx = q.findIndex(item => item.task.id === taskId);
-      if (idx >= 0) {
-        q.splice(idx, 1);
-        if (q.length === 0) this.queuesByModel.delete(k);
-        break;
-      }
-    }
+    this.queue.removeTask(taskId);
 
     task.status = 'failed';
     task.error = 'Cancelled';
@@ -420,14 +198,11 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
   }
 
   private drainQueue(): void {
-    for (const [model, queue] of this.queuesByModel) {
-      while (queue.length > 0 && this.canRunModel(model)) {
-        const item = queue.shift()!;
-        this.runTask(item.task, item.model);
-      }
-      if (queue.length === 0) this.queuesByModel.delete(model);
-      if (this.running >= getConfig().acpMaxConcurrent) break;
-    }
+    this.queue.drain({
+      canRun: (m) => this.concurrency.canRun(m),
+      isAtGlobalLimit: () => this.concurrency.isAtGlobalLimit(),
+      run: (item) => this.launchTask(item.task, item.model),
+    });
   }
 }
 
