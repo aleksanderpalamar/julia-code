@@ -2,16 +2,13 @@ import type { ToolCall, TokenUsage, ToolSchema } from '../providers/types.js';
 import type { ContextHealth } from '../context/health.js';
 import type { AllowRule } from '../security/permissions.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
-import { getProvider } from '../providers/registry.js';
-import { buildContext } from './context.js';
-import { addMessage, addSessionTokens } from '../session/manager.js';
-import { shouldEmergencyCompact, getEmergencyKeepCount } from '../context/health.js';
+import { addMessage } from '../session/manager.js';
 import { log } from '../observability/logger.js';
 import { chooseIterationModel, type ModelPlan } from './model-selection.js';
-import { evaluateToolCall } from './security-gate.js';
-import { runToolCall } from './tool-executor.js';
-import { needsToolCalling } from './heuristics.js';
-import { performEmergencyCompaction } from './compactor.js';
+import { prepareIterationContext } from './iteration/context-prep.js';
+import { streamLLMChat } from './iteration/llm-chat.js';
+import { decidePreMessage } from './iteration/decisions.js';
+import { executeIterationTools } from './iteration/tool-execution.js';
 
 export interface IterationEventSink {
   thinking(): void;
@@ -77,76 +74,47 @@ export async function runOneIteration(
     toolSchemas,
   );
 
-  const ctx = await buildContext(sessionId, currentModel, {
-    planMode, temperament, iteration, maxIterations, extraSystemContent,
+  const { messages, budget, health } = await prepareIterationContext({
+    sessionId,
+    currentModel,
+    auxModel: plan.auxModel,
+    options: { planMode, temperament, iteration, maxIterations, extraSystemContent },
+    emit,
   });
-  let messages = ctx.messages;
-  const { budget } = ctx;
-  let currentHealth = ctx.health;
 
-  emit.contextHealth(currentHealth);
+  const streamed = await streamLLMChat({
+    sessionId,
+    iteration,
+    model: currentModel,
+    messages,
+    tools: currentTools,
+    canRetryOnError: lastHadToolCalls && retryCount < 1,
+    emit,
+  });
 
-  if (shouldEmergencyCompact(currentHealth)) {
-    emit.compacting();
-    const keepCount = getEmergencyKeepCount(currentHealth);
-    await performEmergencyCompaction(sessionId, plan.auxModel, keepCount);
-    const rebuilt = await buildContext(sessionId, currentModel, {
-      planMode, temperament, iteration, maxIterations, extraSystemContent,
-    });
-    emit.contextHealth(rebuilt.health);
-    messages = rebuilt.messages;
-    currentHealth = rebuilt.health;
+  if (streamed.kind === 'error') {
+    return { kind: 'error', message: streamed.message };
   }
-
-  let fullText = '';
-  const toolCalls: ToolCall[] = [];
-  const provider = getProvider('ollama');
-
-  const stream = provider.chat({ model: currentModel, messages, tools: currentTools });
-  for await (const chunk of stream) {
-    switch (chunk.type) {
-      case 'text':
-        fullText += chunk.text!;
-        emit.chunk(chunk.text!);
-        break;
-      case 'tool_call':
-        toolCalls.push(chunk.toolCall!);
-        emit.toolCall(chunk.toolCall!);
-        break;
-      case 'done':
-        if (chunk.usage) {
-          const total = chunk.usage.promptTokens + chunk.usage.completionTokens;
-          addSessionTokens(sessionId, total);
-          emit.usage(chunk.usage);
-        }
-        break;
-      case 'error':
-        if (lastHadToolCalls && retryCount < 1) {
-          retryCount++;
-          log.retry({ sessionId, iteration, kind: 'stream' });
-          emit.clearStreaming();
-          fullText = '__RETRY__';
-        } else {
-          return { kind: 'error', message: chunk.error! };
-        }
-    }
-  }
-
-  if (fullText === '__RETRY__') {
+  if (streamed.kind === 'retry') {
+    retryCount++;
     return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
   }
 
-  const localFailedTools = plan.localHasTools && plan.hasToolModel && !switchedToCloud
-    && toolCalls.length === 0 && needsToolCalling(fullText);
-  if ((useLocalFirst || localFailedTools) && toolCalls.length === 0 && needsToolCalling(fullText)) {
+  const { fullText, toolCalls } = streamed;
+
+  const decision = decidePreMessage({
+    fullText, toolCalls, plan, switchedToCloud, lastHadToolCalls, retryCount, useLocalFirst,
+  });
+
+  if (decision.kind === 'switch-to-cloud') {
     emit.clearStreaming();
     switchedToCloud = true;
-    emit.chunk(`🔄 Trocando para ${plan.loopModel} para executar ferramentas...\n\n`);
-    emit.modelSwitch(plan.loopModel);
+    emit.chunk(`🔄 Trocando para ${decision.newModel} para executar ferramentas...\n\n`);
+    emit.modelSwitch(decision.newModel);
     return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
   }
 
-  if (fullText === '' && toolCalls.length === 0 && lastHadToolCalls && retryCount < 1) {
+  if (decision.kind === 'empty-retry') {
     retryCount++;
     log.retry({ sessionId, iteration, kind: 'empty' });
     return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
@@ -168,52 +136,21 @@ export async function runOneIteration(
 
   retryCount = 0;
 
-  for (const tc of toolCalls) {
-    if (signal?.aborted) return { kind: 'aborted' };
-    const toolName = tc.function.name;
-    const toolArgs = tc.function.arguments;
+  const { aborted } = await executeIterationTools({
+    sessionId,
+    iteration,
+    toolCalls,
+    budget,
+    health,
+    allowRules,
+    approvedAllRef,
+    requestApproval,
+    signal,
+    emit,
+  });
 
-    const gate = await evaluateToolCall({
-      toolName,
-      args: toolArgs,
-      allowRules,
-      approvedAllForSession: approvedAllRef,
-      requestApproval,
-    });
-    if (gate.kind === 'blocked') {
-      addMessage(sessionId, 'tool', gate.reason, undefined, tc.id);
-      emit.toolResult(toolName, gate.reason, false);
-      continue;
-    }
-    if (gate.kind === 'denied') {
-      const resultText = 'Operação negada pelo usuário.';
-      addMessage(sessionId, 'tool', resultText, undefined, tc.id);
-      emit.toolResult(toolName, resultText, false);
-      continue;
-    }
-
-    const executed = await runToolCall({
-      toolName,
-      args: toolArgs,
-      budget,
-      health: currentHealth,
-    });
-    log.toolCall({
-      sessionId,
-      iteration,
-      name: toolName,
-      success: executed.success,
-      durationMs: executed.durationMs,
-    });
-    if (executed.deterministicRetryApplied) {
-      log.retry({ sessionId, iteration, kind: 'deterministic' });
-    }
-
-    addMessage(sessionId, 'tool', executed.resultText, undefined, tc.id);
-    emit.toolResult(toolName, executed.resultText, executed.success);
-  }
+  if (aborted) return { kind: 'aborted' };
 
   lastHadToolCalls = true;
-
   return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
 }
