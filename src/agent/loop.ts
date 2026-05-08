@@ -1,40 +1,20 @@
 import { EventEmitter } from 'node:events';
-import type { ToolCall, TokenUsage } from '../providers/types.js';
 import { getToolSchemas } from '../tools/registry.js';
 import { addMessage } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
-import { type ContextHealth } from '../context/health.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { type AllowRule } from '../security/permissions.js';
 import { log } from '../observability/logger.js';
 import { maybeGenerateTitle } from './title-generator.js';
-import { maybeCompact } from './compactor.js';
 import { resolveModelPlan } from './model-selection.js';
-import { runOneIteration, type IterationDeps, type IterationEventSink, type IterationState } from './iteration.js';
-import { runOrchestration, type OrchestrationEventSink, type OrchestrationProgress } from './orchestrator/index.js';
-import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
+import { runOneIteration, type IterationDeps, type IterationState } from './iteration.js';
+import type { AgentEvents, OrchestrationProgress } from './loop/events.js';
+import { createIterationSink, createOrchestrationSink } from './loop/event-bridge.js';
+import { requestApproval, SessionApprovalState } from './loop/approval-gate.js';
+import { maybeAutoOrchestrate, maybeRunCompaction } from './loop/workflow-decisions.js';
 
-export type { OrchestrationProgress };
-
-export interface AgentEvents {
-  thinking: [];
-  chunk: [text: string];
-  tool_call: [toolCall: ToolCall];
-  tool_result: [name: string, result: string, success: boolean];
-  approval_needed: [toolName: string, args: Record<string, unknown>, respond: (result: ApprovalResult) => void];
-  compacting: [];
-  context_health: [health: ContextHealth];
-  usage: [usage: TokenUsage];
-  title: [title: string];
-  model_switch: [model: string];
-  clear_streaming: [];
-  orchestration_progress: [progress: OrchestrationProgress];
-  subagent_chunk: [taskId: string, label: string, text: string];
-  subagent_status: [taskId: string, label: string, status: string, durationMs?: number];
-  done: [fullText: string];
-  error: [error: string];
-}
+export type { AgentEvents, OrchestrationProgress };
 
 export interface AgentLoopOptions {
   maxIterations?: number;
@@ -46,7 +26,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   private options: AgentLoopOptions;
   private planMode = false;
   private temperament = 'neutral';
-  private approvedAllForSession = false;
+  private approval = new SessionApprovalState();
   private allowRules: AllowRule[] = [];
   private abortController: AbortController | null = null;
 
@@ -104,7 +84,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     }
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
 
-    const approvedAllRef = { current: this.approvedAllForSession };
+    const approvedAllRef = this.approval.createIterationRef();
     let state: IterationState = { iteration: 0, switchedToCloud: false, lastHadToolCalls: false, retryCount: 0 };
 
     try {
@@ -112,20 +92,19 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       this.emit('thinking');
 
-      if (config.acpEnabled && config.acpAutoOrchestrate && !this.options.excludeTools?.includes('subagent')) {
-        const orchestrated = await runOrchestration({
-          sessionId,
-          userMessage,
-          model: auxModel,
-          emit: this.orchestrationSink(),
-        });
-        if (orchestrated) {
-          this.running = false;
-          return;
-        }
+      const orchestrated = await maybeAutoOrchestrate({
+        sessionId,
+        userMessage,
+        model: auxModel,
+        excludeTools: this.options.excludeTools,
+        emit: createOrchestrationSink(this),
+      });
+      if (orchestrated) {
+        this.running = false;
+        return;
       }
 
-      if (await maybeCompact(sessionId, auxModel)) {
+      if (await maybeRunCompaction(sessionId, auxModel)) {
         this.emit('compacting');
       }
 
@@ -140,8 +119,8 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         extraSystemContent: skillContent,
         signal: this.abortController.signal,
         approvedAllRef,
-        requestApproval: (n, a) => this.requestApproval(n, a),
-        emit: this.iterationSink(),
+        requestApproval: (toolName, args) => requestApproval({ toolName, args, emitter: this }),
+        emit: createIterationSink(this),
       };
 
       while (state.iteration < maxIterations) {
@@ -152,7 +131,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           continue;
         }
 
-        this.approvedAllForSession = approvedAllRef.current;
+        this.approval.syncFromRef(approvedAllRef);
 
         if (outcome.kind === 'done') {
           log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'done' });
@@ -180,7 +159,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         }
       }
 
-      this.approvedAllForSession = approvedAllRef.current;
+      this.approval.syncFromRef(approvedAllRef);
       log.loopEnd({ sessionId, iterations: state.iteration, reason: 'max_iterations' });
       addMessage(sessionId, 'assistant', '[Max tool iterations reached]', undefined, undefined, undefined, auxModel);
       this.emit('done', '[Max tool iterations reached]');
@@ -190,45 +169,6 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     } finally {
       this.running = false;
     }
-  }
-
-  private iterationSink(): IterationEventSink {
-    return {
-      thinking: () => this.emit('thinking'),
-      chunk: (text) => this.emit('chunk', text),
-      toolCall: (tc) => this.emit('tool_call', tc),
-      toolResult: (name, text, success) => this.emit('tool_result', name, text, success),
-      compacting: () => this.emit('compacting'),
-      contextHealth: (health) => this.emit('context_health', health),
-      usage: (usage) => this.emit('usage', usage),
-      clearStreaming: () => this.emit('clear_streaming'),
-      modelSwitch: (m) => this.emit('model_switch', m),
-    };
-  }
-
-  private orchestrationSink(): OrchestrationEventSink {
-    return {
-      chunk: (text) => this.emit('chunk', text),
-      usage: (usage) => this.emit('usage', usage),
-      done: (fullText) => this.emit('done', fullText),
-      title: (title) => this.emit('title', title),
-      subagentChunk: (taskId, label, text) => this.emit('subagent_chunk', taskId, label, text),
-      subagentStatus: (taskId, label, status, durationMs) => this.emit('subagent_status', taskId, label, status, durationMs),
-      progress: (progress) => this.emit('orchestration_progress', progress),
-    };
-  }
-
-  private requestApproval(toolName: string, args: Record<string, unknown>): Promise<ApprovalResult> {
-    return new Promise<ApprovalResult>((resolve) => {
-      if (this.listenerCount('approval_needed') === 0) {
-        resolve('approve');
-        return;
-      }
-
-      this.emit('approval_needed', toolName, args, (result: ApprovalResult) => {
-        resolve(result);
-      });
-    });
   }
 
   isRunning(): boolean {
