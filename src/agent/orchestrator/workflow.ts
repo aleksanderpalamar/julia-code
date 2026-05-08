@@ -1,6 +1,5 @@
 import { buildSharedContextSnapshot } from '../compactor.js';
 import type { OrchestrationDeps, PlannedSubtask } from './types.js';
-import { synthesizeFailureReport } from './synthesis.js';
 import { executeSubagents } from './subagent-runner.js';
 
 export interface WorkflowResult {
@@ -9,7 +8,6 @@ export interface WorkflowResult {
   completed: number;
   failed: number;
   allDone: boolean;
-  synthesisText: string;
 }
 
 export async function executeOrchestrationWorkflow(input: {
@@ -18,7 +16,7 @@ export async function executeOrchestrationWorkflow(input: {
   deps: OrchestrationDeps;
 }): Promise<WorkflowResult> {
   const { runId, subtasks, deps } = input;
-  const { sessionId, userMessage, model, emit } = deps;
+  const { sessionId, emit } = deps;
 
   const sharedContext = buildSharedContextSnapshot(sessionId);
 
@@ -30,9 +28,5 @@ export async function executeOrchestrationWorkflow(input: {
     emit,
   });
 
-  const synthesisText = failed > 0
-    ? await synthesizeFailureReport({ sessionId, userMessage, model, resultLines, emit })
-    : '';
-
-  return { subtasks, resultLines, completed, failed, allDone, synthesisText };
+  return { subtasks, resultLines, completed, failed, allDone };
 }

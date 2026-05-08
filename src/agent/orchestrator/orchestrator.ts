@@ -3,6 +3,7 @@ import { maybeGenerateTitle } from '../title-generator.js';
 import type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress } from './types.js';
 import { planSubtasks } from './planner.js';
 import { executeOrchestrationWorkflow } from './workflow.js';
+import { synthesizeFailureReport } from './synthesis.js';
 import {
   recordOrchestrationStart,
   recordOrchestrationCompletion,
@@ -34,13 +35,23 @@ export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean
   recordOrchestrationCompletion(runId, result.allDone ? 'completed' : 'failed', Date.now() - start);
   emit.chunk(buildCompletionSummary(result.completed, result.failed));
 
+  const synthesisText = result.failed > 0
+    ? await synthesizeFailureReport({
+      sessionId,
+      userMessage,
+      model,
+      resultLines: result.resultLines,
+      emit,
+    })
+    : '';
+
   const resultsText = buildResultsText(result.resultLines);
   const fullOutput = buildFinalOutput({
     subtaskCount: plan.subtasks.length,
     completed: result.completed,
     failed: result.failed,
     resultsText,
-    synthesisText: result.synthesisText,
+    synthesisText,
   });
 
   recordAssistantMessage(sessionId, fullOutput, model);
