@@ -82,7 +82,7 @@ describe("backfillMissingEmbeddings", () => {
     expect(embedMock).toHaveBeenCalledTimes(4);
     expect(updateMock).toHaveBeenCalledTimes(4);
     for (const mem of store) {
-      expect(mem.embedding).toBeInstanceOf(Buffer);
+      expect(mem.embedding).toBeInstanceOf(Uint8Array);
     }
   });
 

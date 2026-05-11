@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { SQLInputValue } from 'node:sqlite';
 import { getDb } from './db.js';
 import { getConfig } from '../config/index.js';
 
@@ -32,15 +33,15 @@ export function createSession(title?: string): Session {
     'INSERT INTO sessions (id, title, model) VALUES (?, ?, ?)'
   ).run(id, title ?? 'New Session', model);
 
-  return db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Session;
+  return db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as unknown as Session;
 }
 
 export function getSession(id: string): Session | undefined {
-  return getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Session | undefined;
+  return getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id) as unknown as Session | undefined;
 }
 
 export function listSessions(): Session[] {
-  return getDb().prepare('SELECT * FROM sessions ORDER BY updated_at DESC').all() as Session[];
+  return getDb().prepare('SELECT * FROM sessions ORDER BY updated_at DESC').all() as unknown as Session[];
 }
 
 export function updateSessionTitle(id: string, title: string): void {
@@ -82,8 +83,8 @@ export function addMessage(
     "UPDATE sessions SET updated_at = datetime('now') WHERE id = ?"
   ).run(sessionId);
 
-  const lastId = db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
-  return db.prepare('SELECT * FROM messages WHERE id = ?').get(lastId.id) as Message;
+  const lastId = db.prepare('SELECT last_insert_rowid() as id').get() as unknown as { id: number };
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(lastId.id) as unknown as Message;
 }
 
 export function getMessages(sessionId: string, afterId?: number): Message[] {
@@ -91,17 +92,17 @@ export function getMessages(sessionId: string, afterId?: number): Message[] {
   if (afterId) {
     return db.prepare(
       'SELECT * FROM messages WHERE session_id = ? AND id > ? ORDER BY id'
-    ).all(sessionId, afterId) as Message[];
+    ).all(sessionId, afterId) as unknown as Message[];
   }
   return db.prepare(
     'SELECT * FROM messages WHERE session_id = ? ORDER BY id'
-  ).all(sessionId) as Message[];
+  ).all(sessionId) as unknown as Message[];
 }
 
 export function getMessageCount(sessionId: string): number {
   const row = getDb().prepare(
     'SELECT COUNT(*) as count FROM messages WHERE session_id = ?'
-  ).get(sessionId) as { count: number };
+  ).get(sessionId) as unknown as { count: number };
   return row.count;
 }
 
@@ -109,7 +110,7 @@ export function removeLastAssistantMessage(sessionId: string): void {
   const db = getDb();
   const last = db.prepare(
     'SELECT id FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1'
-  ).get(sessionId, 'assistant') as { id: number } | undefined;
+  ).get(sessionId, 'assistant') as unknown as { id: number } | undefined;
   if (last) {
     db.prepare('DELETE FROM messages WHERE id = ?').run(last.id);
   }
@@ -133,7 +134,7 @@ export interface Memory {
   source_session_id: string | null;
   created_at: string;
   updated_at: string;
-  embedding?: Buffer | null;
+  embedding?: Uint8Array | null;
   embedding_model?: string | null;
   importance?: number | null;
   last_accessed_at?: string | null;
@@ -141,7 +142,7 @@ export interface Memory {
 
 export interface SaveMemoryOptions {
   sourceSessionId?: string;
-  embedding?: Buffer;
+  embedding?: Uint8Array;
   embeddingModel?: string;
   importance?: number;
 }
@@ -178,10 +179,10 @@ export function saveMemory(
     opts.importance ?? null,
   );
 
-  return db.prepare('SELECT * FROM memories WHERE key = ?').get(key) as Memory;
+  return db.prepare('SELECT * FROM memories WHERE key = ?').get(key) as unknown as Memory;
 }
 
-export function updateMemoryEmbedding(key: string, embedding: Buffer, embeddingModel: string): void {
+export function updateMemoryEmbedding(key: string, embedding: Uint8Array, embeddingModel: string): void {
   getDb().prepare(
     `UPDATE memories SET embedding = ?, embedding_model = ?, updated_at = datetime('now') WHERE key = ?`,
   ).run(embedding, embeddingModel, key);
@@ -190,24 +191,24 @@ export function updateMemoryEmbedding(key: string, embedding: Buffer, embeddingM
 export function getEmbeddedMemories(limit = 500): Memory[] {
   return getDb().prepare(
     'SELECT * FROM memories WHERE embedding IS NOT NULL ORDER BY updated_at DESC LIMIT ?'
-  ).all(limit) as Memory[];
+  ).all(limit) as unknown as Memory[];
 }
 
 export function getMemoriesWithoutEmbedding(limit = 100): Memory[] {
   return getDb().prepare(
     'SELECT * FROM memories WHERE embedding IS NULL ORDER BY id ASC LIMIT ?'
-  ).all(limit) as Memory[];
+  ).all(limit) as unknown as Memory[];
 }
 
 export function countMemoriesWithoutEmbedding(): number {
   const row = getDb().prepare(
     'SELECT COUNT(*) as count FROM memories WHERE embedding IS NULL'
-  ).get() as { count: number };
+  ).get() as unknown as { count: number };
   return row.count;
 }
 
 export function getMemory(key: string): Memory | undefined {
-  return getDb().prepare('SELECT * FROM memories WHERE key = ?').get(key) as Memory | undefined;
+  return getDb().prepare('SELECT * FROM memories WHERE key = ?').get(key) as unknown as Memory | undefined;
 }
 
 export function searchMemories(query: string, category?: string, limit = 20): Memory[] {
@@ -218,17 +219,17 @@ export function searchMemories(query: string, category?: string, limit = 20): Me
   const patterns = tokens.length > 0 ? tokens.map(t => `%${t}%`) : [`%${query}%`];
 
   const matchClause = patterns.map(() => '(key LIKE ? OR content LIKE ?)').join(' OR ');
-  const params: unknown[] = [];
+  const params: SQLInputValue[] = [];
   for (const p of patterns) { params.push(p, p); }
 
   if (category) {
     return db.prepare(
       `SELECT * FROM memories WHERE category = ? AND (${matchClause}) ORDER BY updated_at DESC LIMIT ?`
-    ).all(category, ...params, limit) as Memory[];
+    ).all(category, ...params, limit) as unknown as Memory[];
   }
   return db.prepare(
     `SELECT * FROM memories WHERE ${matchClause} ORDER BY updated_at DESC LIMIT ?`
-  ).all(...params, limit) as Memory[];
+  ).all(...params, limit) as unknown as Memory[];
 }
 
 function tokenizeQuery(query: string): string[] {
@@ -249,11 +250,11 @@ export function listMemories(category?: string, limit = 20): Memory[] {
   if (category) {
     return db.prepare(
       'SELECT * FROM memories WHERE category = ? ORDER BY updated_at DESC LIMIT ?'
-    ).all(category, limit) as Memory[];
+    ).all(category, limit) as unknown as Memory[];
   }
   return db.prepare(
     'SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?'
-  ).all(limit) as Memory[];
+  ).all(limit) as unknown as Memory[];
 }
 
 export function deleteMemory(key: string): boolean {
@@ -264,20 +265,20 @@ export function deleteMemory(key: string): boolean {
 export function getLastAssistantModel(sessionId: string): string | null {
   const row = getDb().prepare(
     'SELECT model FROM messages WHERE session_id = ? AND role = ? AND model IS NOT NULL ORDER BY id DESC LIMIT 1'
-  ).get(sessionId, 'assistant') as { model: string } | undefined;
+  ).get(sessionId, 'assistant') as unknown as { model: string } | undefined;
   return row?.model ?? null;
 }
 
 export function getRecentMemories(limit = 15): Memory[] {
   return getDb().prepare(
     'SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?'
-  ).all(limit) as Memory[];
+  ).all(limit) as unknown as Memory[];
 }
 
 export function getLatestUserMessage(sessionId: string): string | null {
   const row = getDb().prepare(
     "SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1"
-  ).get(sessionId) as { content: string } | undefined;
+  ).get(sessionId) as unknown as { content: string } | undefined;
   return row?.content ?? null;
 }
 
@@ -297,7 +298,7 @@ export function createOrchestrationRun(id: string, parentSessionId: string, user
   db.prepare(
     'INSERT INTO orchestration_runs (id, parent_session_id, user_task, subtask_count) VALUES (?, ?, ?, ?)'
   ).run(id, parentSessionId, userTask, subtaskCount);
-  return db.prepare('SELECT * FROM orchestration_runs WHERE id = ?').get(id) as OrchestrationRun;
+  return db.prepare('SELECT * FROM orchestration_runs WHERE id = ?').get(id) as unknown as OrchestrationRun;
 }
 
 export function completeOrchestrationRun(id: string, status: 'completed' | 'failed', durationMs: number): void {
@@ -307,13 +308,13 @@ export function completeOrchestrationRun(id: string, status: 'completed' | 'fail
 }
 
 export function getOrchestrationRun(id: string): OrchestrationRun | undefined {
-  return getDb().prepare('SELECT * FROM orchestration_runs WHERE id = ?').get(id) as OrchestrationRun | undefined;
+  return getDb().prepare('SELECT * FROM orchestration_runs WHERE id = ?').get(id) as unknown as OrchestrationRun | undefined;
 }
 
 export function listOrchestrationRuns(parentSessionId: string): OrchestrationRun[] {
   return getDb().prepare(
     'SELECT * FROM orchestration_runs WHERE parent_session_id = ? ORDER BY created_at DESC'
-  ).all(parentSessionId) as OrchestrationRun[];
+  ).all(parentSessionId) as unknown as OrchestrationRun[];
 }
 
 export interface SubagentRun {
@@ -336,7 +337,7 @@ export function createSubagentRun(id: string, runId: string, sessionId: string, 
   db.prepare(
     'INSERT INTO subagent_runs (id, run_id, session_id, task, model) VALUES (?, ?, ?, ?, ?)'
   ).run(id, runId, sessionId, task, model ?? null);
-  return db.prepare('SELECT * FROM subagent_runs WHERE id = ?').get(id) as SubagentRun;
+  return db.prepare('SELECT * FROM subagent_runs WHERE id = ?').get(id) as unknown as SubagentRun;
 }
 
 export function updateSubagentRunStatus(
@@ -346,7 +347,7 @@ export function updateSubagentRunStatus(
 ): void {
   const db = getDb();
   const sets = ['status = ?'];
-  const params: unknown[] = [status];
+  const params: SQLInputValue[] = [status];
 
   if (extra?.startedAt) { sets.push('started_at = ?'); params.push(extra.startedAt); }
   if (extra?.completedAt) { sets.push('completed_at = ?'); params.push(extra.completedAt); }
@@ -359,19 +360,19 @@ export function updateSubagentRunStatus(
 }
 
 export function getSubagentRun(id: string): SubagentRun | undefined {
-  return getDb().prepare('SELECT * FROM subagent_runs WHERE id = ?').get(id) as SubagentRun | undefined;
+  return getDb().prepare('SELECT * FROM subagent_runs WHERE id = ?').get(id) as unknown as SubagentRun | undefined;
 }
 
 export function listSubagentRuns(runId: string): SubagentRun[] {
   return getDb().prepare(
     'SELECT * FROM subagent_runs WHERE run_id = ? ORDER BY created_at'
-  ).all(runId) as SubagentRun[];
+  ).all(runId) as unknown as SubagentRun[];
 }
 
 export function getLatestCompaction(sessionId: string): Compaction | undefined {
   return getDb().prepare(
     'SELECT * FROM compactions WHERE session_id = ? ORDER BY id DESC LIMIT 1'
-  ).get(sessionId) as Compaction | undefined;
+  ).get(sessionId) as unknown as Compaction | undefined;
 }
 
 export function saveCompaction(
@@ -386,6 +387,6 @@ export function saveCompaction(
     'INSERT INTO compactions (session_id, summary, messages_start, messages_end, format) VALUES (?, ?, ?, ?, ?)'
   ).run(sessionId, summary, messagesStart, messagesEnd, format);
 
-  const lastId = db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
-  return db.prepare('SELECT * FROM compactions WHERE id = ?').get(lastId.id) as Compaction;
+  const lastId = db.prepare('SELECT last_insert_rowid() as id').get() as unknown as { id: number };
+  return db.prepare('SELECT * FROM compactions WHERE id = ?').get(lastId.id) as unknown as Compaction;
 }

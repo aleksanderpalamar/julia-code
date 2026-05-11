@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
-let testDb: Database.Database;
+let testDb: DatabaseSync;
 
 vi.mock("../src/config/index.js", () => ({
   getConfig: () => ({
@@ -23,8 +23,8 @@ import { saveMemory, searchMemories } from "../src/session/manager.js";
 
 describe("searchMemories tokenization", () => {
   beforeEach(() => {
-    testDb = new Database(":memory:");
-    testDb.pragma("journal_mode = WAL");
+    testDb = new DatabaseSync(":memory:");
+    testDb.exec("PRAGMA journal_mode = WAL");
     initSchema(testDb);
 
     saveMemory("user-name", "O nome do usuário é palamar", "user");

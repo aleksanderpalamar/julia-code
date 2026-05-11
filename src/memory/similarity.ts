@@ -22,12 +22,12 @@ export function recencyScore(createdAtIso: string, halflifeDays: number, now: nu
   return Math.exp(-Math.LN2 * (ageDays / halflifeDays));
 }
 
-export function bufferToFloat32(buf: Buffer): Float32Array {
+export function bufferToFloat32(buf: Uint8Array): Float32Array {
   const copy = new ArrayBuffer(buf.byteLength);
   new Uint8Array(copy).set(buf);
   return new Float32Array(copy);
 }
 
-export function float32ToBuffer(vec: Float32Array): Buffer {
-  return Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength);
+export function float32ToBuffer(vec: Float32Array): Uint8Array {
+  return new Uint8Array(vec.buffer, vec.byteOffset, vec.byteLength);
 }

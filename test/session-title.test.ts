@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import type { ChatChunk } from "../src/providers/types.js";
 import {
   createSession,
@@ -27,7 +27,7 @@ vi.mock("../src/config/index.js", () => ({
   }),
 }));
 
-let testDb: Database.Database;
+let testDb: DatabaseSync;
 
 vi.mock("../src/session/db.js", () => ({
   getDb: () => testDb,
@@ -102,10 +102,10 @@ vi.mock("../src/context/compaction.js", () => ({
   deserializeCompaction: vi.fn(),
 }));
 
-function initTestDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+function initTestDb(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
