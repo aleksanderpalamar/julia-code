@@ -57,7 +57,7 @@ describe("ensureEmbedding", () => {
     expect(updateEmbeddingMock).toHaveBeenCalledTimes(1);
     const [key, buf, model] = updateEmbeddingMock.mock.calls[0];
     expect(key).toBe("k");
-    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf).toBeInstanceOf(Uint8Array);
     expect(model).toBe("mock-embed");
   });
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
-let testDb: Database.Database;
+let testDb: DatabaseSync;
 
 vi.mock("../src/config/index.js", () => ({
   getConfig: () => ({
@@ -27,9 +27,9 @@ import {
   getMemoriesWithoutEmbedding,
 } from "../src/session/manager.js";
 
-function openLegacyMemoriesDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("journal_mode = WAL");
+function openLegacyMemoriesDb(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA journal_mode = WAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS memories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +56,7 @@ describe("memories schema migration", () => {
 
     initSchema(testDb);
 
-    const cols = testDb.pragma("table_info(memories)") as Array<{ name: string; type: string }>;
+    const cols = testDb.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string; type: string }>;
     const names = cols.map(c => c.name).sort();
     expect(names).toContain("embedding");
     expect(names).toContain("embedding_model");
@@ -65,7 +65,7 @@ describe("memories schema migration", () => {
 
     const existing = testDb.prepare("SELECT * FROM memories WHERE key = ?").get("legacy-key") as {
       content: string;
-      embedding: Buffer | null;
+      embedding: Uint8Array | null;
       importance: number | null;
     };
     expect(existing.content).toBe("legacy content");
@@ -101,7 +101,7 @@ describe("memories schema migration", () => {
       importance: 0.9,
     });
 
-    expect(mem.embedding).toBeInstanceOf(Buffer);
+    expect(mem.embedding).toBeInstanceOf(Uint8Array);
     expect(Buffer.from(mem.embedding!).equals(embedding)).toBe(true);
     expect(mem.embedding_model).toBe("nomic-embed-text");
     expect(mem.importance).toBe(0.9);
@@ -117,7 +117,7 @@ describe("memories schema migration", () => {
 
     const after = getMemory("k")!;
     expect(after.content).toBe("v2");
-    expect(after.embedding).toBeInstanceOf(Buffer);
+    expect(after.embedding).toBeInstanceOf(Uint8Array);
     expect(Buffer.from(after.embedding!).equals(embedding)).toBe(true);
     expect(after.embedding_model).toBe("nomic-embed-text");
     expect(after.importance).toBe(0.7);

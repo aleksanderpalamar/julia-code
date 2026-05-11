@@ -63,7 +63,7 @@ describe("bufferToFloat32 / float32ToBuffer", () => {
   it("round-trips a Float32Array via Buffer", () => {
     const original = Float32Array.from([0.1, -0.5, 0.999, 1e-6]);
     const buf = float32ToBuffer(original);
-    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf).toBeInstanceOf(Uint8Array);
     const roundTrip = bufferToFloat32(buf);
     expect(roundTrip.length).toBe(original.length);
     for (let i = 0; i < original.length; i++) {

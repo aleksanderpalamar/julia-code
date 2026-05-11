@@ -1,11 +1,11 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getConfig } from '../config/index.js';
 
-let _db: Database.Database | null = null;
+let _db: DatabaseSync | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): DatabaseSync {
   if (_db) return _db;
 
   const dbPath = getConfig().dbPath;
@@ -13,9 +13,9 @@ export function getDb(): Database.Database {
 
   mkdirSync(dbDir, { recursive: true, mode: 0o700 });
 
-  _db = new Database(dbPath);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
+  _db = new DatabaseSync(dbPath);
+  _db.exec('PRAGMA journal_mode = WAL');
+  _db.exec('PRAGMA foreign_keys = ON');
 
   try {
     chmodSync(dbPath, 0o600);
@@ -26,7 +26,7 @@ export function getDb(): Database.Database {
   return _db;
 }
 
-export function initSchema(db: Database.Database): void {
+export function initSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -41,8 +41,8 @@ export function initSchema(db: Database.Database): void {
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK(role IN ('system', 'user', 'assistant', 'tool')),
       content TEXT NOT NULL,
-      tool_calls TEXT,       -- JSON array of tool calls (for assistant messages)
-      tool_call_id TEXT,     -- For tool result messages
+      tool_calls TEXT,
+      tool_call_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -102,17 +102,17 @@ export function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_subagent_runs_run ON subagent_runs(run_id);
   `);
 
-  const columns = db.pragma('table_info(sessions)') as Array<{ name: string }>;
+  const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
   if (!columns.some(c => c.name === 'total_tokens')) {
     db.exec('ALTER TABLE sessions ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0');
   }
 
-  const msgCols = db.pragma('table_info(messages)') as Array<{ name: string }>;
+  const msgCols = db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>;
   if (!msgCols.some(c => c.name === 'images')) {
     db.exec('ALTER TABLE messages ADD COLUMN images TEXT');
   }
 
-  const compCols = db.pragma('table_info(compactions)') as Array<{ name: string }>;
+  const compCols = db.prepare('PRAGMA table_info(compactions)').all() as Array<{ name: string }>;
   if (!compCols.some(c => c.name === 'format')) {
     db.exec("ALTER TABLE compactions ADD COLUMN format TEXT NOT NULL DEFAULT 'text'");
   }
@@ -121,7 +121,7 @@ export function initSchema(db: Database.Database): void {
     db.exec('ALTER TABLE messages ADD COLUMN model TEXT');
   }
 
-  const memCols = db.pragma('table_info(memories)') as Array<{ name: string }>;
+  const memCols = db.prepare('PRAGMA table_info(memories)').all() as Array<{ name: string }>;
   if (!memCols.some(c => c.name === 'embedding')) {
     db.exec('ALTER TABLE memories ADD COLUMN embedding BLOB');
   }
