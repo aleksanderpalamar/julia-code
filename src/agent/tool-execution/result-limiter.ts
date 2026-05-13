@@ -1,7 +1,7 @@
 import { computeToolResultCap, type ContextBudget } from '../../context/budget.js';
 import { getToolResultCapFactor, type ContextHealth } from '../../context/health.js';
 
-export const DEFAULT_MAX_RESULT_CHARS = 12000;
+const DEFAULT_MAX_RESULT_CHARS = 12000;
 
 export function computeResultLimit(
   toolName: string,

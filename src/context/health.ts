@@ -2,7 +2,7 @@ import type { ChatMessage } from '../providers/types.js';
 import type { ContextBudget } from './budget.js';
 import { estimateMessagesTokens } from './token-counter.js';
 
-export type WarningLevel = 'ok' | 'warning' | 'critical' | 'emergency';
+type WarningLevel = 'ok' | 'warning' | 'critical' | 'emergency';
 
 export interface ContextHealth {
   totalBudget: number;

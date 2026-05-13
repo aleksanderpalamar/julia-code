@@ -1,8 +1,8 @@
 import { minimatch } from 'minimatch';
 
-export type RiskLevel = 'safe' | 'moderate' | 'dangerous';
+type RiskLevel = 'safe' | 'moderate' | 'dangerous';
 
-export const TOOL_RISK: Record<string, RiskLevel> = {
+const TOOL_RISK: Record<string, RiskLevel> = {
   read: 'safe',
   glob: 'safe',
   grep: 'safe',
@@ -38,7 +38,7 @@ export function isBlockedCommand(command: string): boolean {
   return BLOCKED_COMMANDS.some(pattern => pattern.test(command));
 }
 
-export const SAFE_ENV_VARS = [
+const SAFE_ENV_VARS = [
   'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE',
   'TERM', 'NO_COLOR', 'EDITOR', 'VISUAL', 'TZ', 'TMPDIR',
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR',

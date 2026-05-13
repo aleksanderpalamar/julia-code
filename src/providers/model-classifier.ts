@@ -14,7 +14,7 @@ export interface OllamaModelEntry {
   };
 }
 
-export interface ModelClassification {
+interface ModelClassification {
   id: string;
   isCloud: boolean;
   isLocal: boolean;

@@ -9,14 +9,14 @@ import {
   isEmbeddingProviderAvailable,
 } from './embeddings/index.js';
 
-export interface BackfillOptions {
+interface BackfillOptions {
   batchSize?: number;
   maxConsecutiveFailures?: number;
   signal?: AbortSignal;
   onProgress?: (processed: number, total: number) => void;
 }
 
-export interface BackfillResult {
+interface BackfillResult {
   processed: number;
   failed: number;
   total: number;

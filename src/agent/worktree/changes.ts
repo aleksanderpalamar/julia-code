@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import type { Worktree } from './types.js';
 
-export function worktreeHasChanges(worktree: Worktree): boolean {
+function worktreeHasChanges(worktree: Worktree): boolean {
   const status = execSync('git status --porcelain', {
     cwd: worktree.path,
     encoding: 'utf-8',

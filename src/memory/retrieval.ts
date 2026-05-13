@@ -5,7 +5,7 @@ import type { EmbeddedMemory, RankedMemory, RankingWeights } from './types.js';
 
 const DEFAULT_IMPORTANCE = 0.5;
 
-export interface RetrievalDeps {
+interface RetrievalDeps {
   provider: EmbeddingProvider;
   weights: RankingWeights;
   halflifeDays: number;

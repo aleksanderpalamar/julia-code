@@ -39,7 +39,7 @@ const SYSTEM_WRITE_DENIED: RegExp[] = [
   /^\/var\/log\//,
 ];
 
-export function isDeniedPath(resolvedPath: string): boolean {
+function isDeniedPath(resolvedPath: string): boolean {
   for (const pattern of DENIED_PATH_PATTERNS) {
     if (pattern.test(resolvedPath)) {
       return true;
@@ -48,7 +48,7 @@ export function isDeniedPath(resolvedPath: string): boolean {
   return false;
 }
 
-export function isSystemPath(resolvedPath: string): boolean {
+function isSystemPath(resolvedPath: string): boolean {
   for (const pattern of SYSTEM_WRITE_DENIED) {
     if (pattern.test(resolvedPath)) {
       return true;
@@ -61,7 +61,7 @@ export function validateReadPath(inputPath: string): string {
   const resolved = resolveAndContain(inputPath);
 
   if (isDeniedPath(resolved)) {
-    throw new Error(`Acesso negado: "${inputPath}" é um caminho sensível protegido`);
+    throw new Error(`Access denied: "${inputPath}" It is a protected, sensitive path.`);
   }
 
   return resolved;
@@ -71,12 +71,12 @@ export function validateWritePath(inputPath: string): string {
   const resolved = validateReadPath(inputPath);
 
   if (isSystemPath(resolved)) {
-    throw new Error(`Acesso negado: não é permitido escrever em "${inputPath}" (caminho de sistema)`);
+    throw new Error(`Access denied: writing in is not allowed "${inputPath}" (system path)`);
   }
 
   if (resolved === JULIA_SETTINGS_PATH) {
     throw new Error(
-      `Acesso negado: "~/.juliacode/settings.json" é gerenciado pela própria Julia via slash commands (/mcp, /model, /trust). Edição direta via write/edit é bloqueada para evitar perda de campos.`
+      `Access denied: "~/.juliacode/settings.json" It is managed by Julia herself via slash commands. (/mcp, /model, /trust). Edição direta via write/edit é bloqueada para evitar perda de campos.`
     );
   }
 
@@ -98,7 +98,7 @@ function resolveAndContain(inputPath: string): string {
     return resolved;
   }
 
-  throw new Error(`Acesso negado: "${inputPath}" está fora do diretório do projeto`);
+  throw new Error(`Access denied: "${inputPath}" It's outside the project directory.`);
 }
 
 function isWithin(filePath: string, dir: string): boolean {

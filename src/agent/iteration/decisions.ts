@@ -2,7 +2,7 @@ import type { ToolCall } from '../../providers/types.js';
 import { needsToolCalling } from '../heuristics.js';
 import type { ModelPlan } from '../model-selection.js';
 
-export type PreMessageDecision =
+type PreMessageDecision =
   | { kind: 'switch-to-cloud'; newModel: string }
   | { kind: 'empty-retry' }
   | { kind: 'proceed' };

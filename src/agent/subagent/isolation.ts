@@ -3,7 +3,7 @@ import { getProjectDir } from '../../config/workspace.js';
 import { createWorktree, removeWorktree, mergeWorktree, isGitRepo, type Worktree } from '../worktree.js';
 import type { ToolContext } from '../../tools/types.js';
 
-export interface IsolationSetup {
+interface IsolationSetup {
   worktree: Worktree | null;
   toolContext: ToolContext;
 }

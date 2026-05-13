@@ -6,7 +6,7 @@ import type { OrchestrationEventSink } from './types.js';
 const SYNTHESIS_SYSTEM_PROMPT =
   'You are a helpful assistant. The user gave a task that was split into subtasks and executed in parallel by subagents. Some subtasks failed. Briefly explain what succeeded and what went wrong, and suggest how to fix the failures. Be concise and direct. Respond in the same language the user used.';
 
-export interface SynthesisDeps {
+interface SynthesisDeps {
   sessionId: string;
   userMessage: string;
   model: string;

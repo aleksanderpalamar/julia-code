@@ -45,7 +45,7 @@ export interface IterationState {
   retryCount: number;
 }
 
-export type IterationOutcome =
+type IterationOutcome =
   | { kind: 'continue'; state: IterationState }
   | { kind: 'done'; fullText: string }
   | { kind: 'aborted' }
