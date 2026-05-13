@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { minimatch } from 'minimatch';
-import type { ToolDefinition, ToolContext } from './types.js';
+import type { ToolDefinition } from './types.js';
 import { getActiveToolContext } from './registry.js';
 
 export const globTool: ToolDefinition = {

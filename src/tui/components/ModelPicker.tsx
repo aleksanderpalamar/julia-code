@@ -17,7 +17,7 @@ export function ModelPicker({ models, onSelect, onCancel }: Props) {
   const currentIndex = models.findIndex(m => m.current);
   const [selected, setSelected] = useState(currentIndex >= 0 ? currentIndex : 0);
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.upArrow) {
       setSelected(prev => (prev <= 0 ? models.length - 1 : prev - 1));
     } else if (key.downArrow) {

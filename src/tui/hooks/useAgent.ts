@@ -9,7 +9,7 @@ import type { AgentMode, Temperament } from '../types.js';
 import { WRITE_TOOLS } from '../types.js';
 import type { ApprovalResult } from '../components/ApprovalPrompt.js';
 
-export interface PendingApproval {
+interface PendingApproval {
   toolName: string;
   args: Record<string, unknown>;
   respond: (result: ApprovalResult) => void;
@@ -70,7 +70,7 @@ export function useAgent(onSessionChanged?: () => void) {
       ]);
     };
 
-    const onDone = (fullText: string) => {
+    const onDone = (_fullText: string) => {
       setIsThinking(false);
       setOrchestrationProgress(null);
       setStreamingText(prev => {
@@ -137,7 +137,7 @@ export function useAgent(onSessionChanged?: () => void) {
       });
     };
 
-    const onSubagentStatus = (taskId: string, label: string, status: string, durationMs?: number) => {
+    const onSubagentStatus = (_taskId: string, label: string, status: string, durationMs?: number) => {
       const dur = durationMs !== undefined ? ` (${(durationMs / 1000).toFixed(1)}s)` : '';
       const icon = status === 'completed' ? '✓' : status === 'failed' ? '✗' : '▸';
       setEntries(e => [...e, {

@@ -7,7 +7,6 @@ import {
   listSessions,
   getSession,
   getMessages,
-  addMessage,
 } from '../session/manager.js';
 
 const agent = new AgentLoop();

@@ -1,4 +1,4 @@
-export type Breakpoint = 'wide' | 'medium' | 'narrow';
+type Breakpoint = 'wide' | 'medium' | 'narrow';
 
 export function getBreakpoint(columns: number): Breakpoint {
   if (columns >= 90) return 'wide';

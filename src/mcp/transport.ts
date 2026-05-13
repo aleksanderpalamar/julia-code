@@ -172,7 +172,7 @@ export class McpTransport extends EventEmitter {
   }
 
   private rejectAll(error: Error): void {
-    for (const [id, pending] of this.pending) {
+    for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);
     }
