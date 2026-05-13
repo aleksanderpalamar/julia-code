@@ -8,11 +8,11 @@ import { log } from '../../observability/logger.js';
 import { evaluateToolCall } from '../security-gate.js';
 import { runToolCall } from '../tool-executor.js';
 
-export interface ToolExecutionEmitter {
+interface ToolExecutionEmitter {
   toolResult(name: string, text: string, success: boolean): void;
 }
 
-export interface ToolExecutionInput {
+interface ToolExecutionInput {
   sessionId: string;
   iteration: number;
   toolCalls: ToolCall[];

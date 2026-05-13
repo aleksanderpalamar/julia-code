@@ -15,7 +15,7 @@ const options = [
 export function TrustPrompt({ directory, onTrust, onExit }: Props) {
   const [selected, setSelected] = useState(0);
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.upArrow) {
       setSelected(0);
     } else if (key.downArrow) {

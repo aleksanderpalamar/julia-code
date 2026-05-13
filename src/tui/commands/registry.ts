@@ -40,18 +40,10 @@ export function getInvocableSkillCommands(): SlashCommand[] {
     }));
 }
 
-export function isSkillCommand(name: string): boolean {
-  return getInvocableSkillCommands().some(cmd => cmd.name === name);
-}
-
 export function filterCommands(input: string): SlashCommand[] {
   if (!input.startsWith("/")) return [];
   const prefix = input.toLowerCase();
   const staticMatches = commands.filter((cmd) => cmd.name.startsWith(prefix));
   const skillMatches = getInvocableSkillCommands().filter((cmd) => cmd.name.startsWith(prefix));
   return [...staticMatches, ...skillMatches];
-}
-
-export function getAllCommands(): SlashCommand[] {
-  return [...commands, ...getInvocableSkillCommands()];
 }

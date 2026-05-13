@@ -3,12 +3,12 @@ import { getProvider } from '../../providers/registry.js';
 import { addSessionTokens } from '../../session/manager.js';
 import { log } from '../../observability/logger.js';
 
-export type LLMStreamOutcome =
+type LLMStreamOutcome =
   | { kind: 'ok'; fullText: string; toolCalls: ToolCall[] }
   | { kind: 'retry' }
   | { kind: 'error'; message: string };
 
-export interface LLMStreamEmitter {
+interface LLMStreamEmitter {
   chunk(text: string): void;
   toolCall(tc: ToolCall): void;
   usage(usage: TokenUsage): void;

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from './types.js';
 import { getSubagentManager } from '../agent/subagent.js';
-import { listOrchestrationRuns, createOrchestrationRun, completeOrchestrationRun } from '../session/manager.js';
+import { listOrchestrationRuns, createOrchestrationRun } from '../session/manager.js';
 
 let currentSessionId: string | undefined;
 

@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolSchema } from '../providers/types.js';
+import type { ChatMessage } from '../providers/types.js';
 
 const MESSAGE_OVERHEAD = 4;
 
@@ -8,7 +8,7 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-export function estimateMessageTokens(msg: ChatMessage): number {
+function estimateMessageTokens(msg: ChatMessage): number {
   let chars = msg.content.length;
 
   if (msg.tool_calls) {
@@ -28,12 +28,6 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
     total += estimateMessageTokens(msg);
   }
   return total;
-}
-
-export function estimateToolSchemaTokens(tools: ToolSchema[]): number {
-  if (tools.length === 0) return 0;
-  const json = JSON.stringify(tools);
-  return Math.ceil(json.length / CHARS_PER_TOKEN);
 }
 
 export function estimateDbMessageTokens(content: string, toolCalls?: string | null): number {

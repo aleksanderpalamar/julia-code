@@ -26,10 +26,10 @@
     "dev": "tsx watch juju.ts",
     "build": "tsc && node scripts/fix-shebang.mjs",
     "prepublishOnly": "npm run build",
-    "test": "vitest"
+    "test": "vitest",
+    "knip": "knip"
   },
   "dependencies": {
-    "cli-highlight": "2.1.11",
     "dotenv": "16.6.1",
     "ink": "5.2.1",
     "ink-spinner": "5.0.0",
@@ -44,6 +44,7 @@
     "@types/minimatch": "5.1.2",
     "@types/node": "22.19.15",
     "@types/react": "18.3.28",
+    "knip": "5.39.4",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
     "vitest": "3.2.4"

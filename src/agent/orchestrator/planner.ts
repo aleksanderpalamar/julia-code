@@ -6,11 +6,11 @@ import { analyzeComplexity } from '../complexity.js';
 import { getCachedPlannerResult, setCachedPlannerResult, type CachedPlannerResult } from '../planner-cache.js';
 import type { PlannedSubtask } from './types.js';
 
-export type PlanOutcome =
+type PlanOutcome =
   | { kind: 'simple' }
   | { kind: 'decomposable'; subtasks: PlannedSubtask[]; via: 'llm' | 'cache' };
 
-export interface PlannerDeps {
+interface PlannerDeps {
   sessionId: string;
   userMessage: string;
   model: string;

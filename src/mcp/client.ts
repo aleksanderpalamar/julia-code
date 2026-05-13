@@ -1,7 +1,7 @@
 import { McpTransport } from "./transport.js";
 import type { McpServerConfig } from "../config/types.js";
 
-export interface McpToolInfo {
+interface McpToolInfo {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -17,7 +17,7 @@ export class McpClient {
 
   constructor(
     readonly serverName: string,
-    private config: McpServerConfig,
+    config: McpServerConfig,
   ) {
     this.transport = new McpTransport(config.command, config.args, config.env);
   }
@@ -33,14 +33,11 @@ export class McpClient {
   async connect(): Promise<void> {
     this.transport.start();
 
-    const initResult = (await this.transport.send("initialize", {
+    await this.transport.send("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
       clientInfo: CLIENT_INFO,
-    })) as {
-      capabilities?: unknown;
-      serverInfo?: { name?: string; version?: string };
-    };
+    });
 
     this.transport.notify("notifications/initialized");
 

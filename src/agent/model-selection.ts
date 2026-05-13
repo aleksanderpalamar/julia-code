@@ -22,7 +22,7 @@ export async function resolveModelPlan(
   return { loopModel, auxModel, hasToolModel, localHasTools };
 }
 
-export interface IterationModelChoice {
+interface IterationModelChoice {
   model: string;
   tools: ToolSchema[] | undefined;
   useLocalFirst: boolean;

@@ -5,7 +5,7 @@ import { buildContext } from '../context.js';
 import { shouldEmergencyCompact, getEmergencyKeepCount } from '../../context/health.js';
 import { performEmergencyCompaction } from '../compactor.js';
 
-export interface ContextOptions {
+interface ContextOptions {
   planMode: boolean;
   temperament: string;
   iteration: number;
@@ -13,13 +13,13 @@ export interface ContextOptions {
   extraSystemContent?: string;
 }
 
-export interface PreparedContext {
+interface PreparedContext {
   messages: ChatMessage[];
   budget: ContextBudget | null;
   health: ContextHealth;
 }
 
-export interface PreparationEmitter {
+interface PreparationEmitter {
   compacting(): void;
   contextHealth(health: ContextHealth): void;
 }

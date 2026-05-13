@@ -73,16 +73,6 @@ export function getAvailableModels(): Array<{ id: string; name?: string; isCloud
   }
 }
 
-export function getCurrentModel(): string {
-  try {
-    const raw = readRawSettings();
-    const def = raw.models?.default;
-    return typeof def === 'string' ? def : '';
-  } catch {
-    return '';
-  }
-}
-
 export async function syncAvailableModels(): Promise<void> {
   const { listOllamaModelsDetailed } = await import('../providers/ollama.js');
   const { classifyModels, selectToolModel, selectFastModel } = await import('../providers/model-classifier.js');

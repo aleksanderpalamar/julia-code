@@ -8,7 +8,7 @@ import type { ConcurrencyController } from './concurrency.js';
 import { setupIsolation, finalizeWorktree, teardownWorktree } from './isolation.js';
 import type { SubagentTask, SubagentEvents } from './types.js';
 
-export interface RunTaskDeps {
+interface RunTaskDeps {
   task: SubagentTask;
   model: string | undefined;
   agents: Map<string, AgentLoop>;
@@ -154,17 +154,3 @@ export function runTask(deps: RunTaskDeps): void {
   });
 }
 
-export function finalizeCancelledTask(opts: {
-  task: SubagentTask;
-  modelKey: string;
-  agents: Map<string, AgentLoop>;
-  concurrency: ConcurrencyController;
-  emitter: EventEmitter<SubagentEvents>;
-  drainQueue: () => void;
-}): void {
-  finalizeTask({
-    ...opts,
-    status: 'failed',
-    error: 'Cancelled',
-  });
-}

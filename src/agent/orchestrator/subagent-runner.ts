@@ -3,7 +3,7 @@ import type { OrchestrationEventSink, PlannedSubtask } from './types.js';
 
 type SubagentEmit = Pick<OrchestrationEventSink, 'chunk' | 'subagentChunk' | 'subagentStatus' | 'progress'>;
 
-export interface SubagentExecutionDeps {
+interface SubagentExecutionDeps {
   sessionId: string;
   runId: string;
   subtasks: PlannedSubtask[];
@@ -11,7 +11,7 @@ export interface SubagentExecutionDeps {
   emit: SubagentEmit;
 }
 
-export interface SubagentExecutionResult {
+interface SubagentExecutionResult {
   resultLines: string[];
   completed: number;
   failed: number;

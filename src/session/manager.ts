@@ -106,17 +106,7 @@ export function getMessageCount(sessionId: string): number {
   return row.count;
 }
 
-export function removeLastAssistantMessage(sessionId: string): void {
-  const db = getDb();
-  const last = db.prepare(
-    'SELECT id FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1'
-  ).get(sessionId, 'assistant') as unknown as { id: number } | undefined;
-  if (last) {
-    db.prepare('DELETE FROM messages WHERE id = ?').run(last.id);
-  }
-}
-
-export interface Compaction {
+interface Compaction {
   id: number;
   session_id: string;
   summary: string;
@@ -140,7 +130,7 @@ export interface Memory {
   last_accessed_at?: string | null;
 }
 
-export interface SaveMemoryOptions {
+interface SaveMemoryOptions {
   sourceSessionId?: string;
   embedding?: Uint8Array;
   embeddingModel?: string;
@@ -282,7 +272,7 @@ export function getLatestUserMessage(sessionId: string): string | null {
   return row?.content ?? null;
 }
 
-export interface OrchestrationRun {
+interface OrchestrationRun {
   id: string;
   parent_session_id: string;
   user_task: string;
@@ -307,17 +297,13 @@ export function completeOrchestrationRun(id: string, status: 'completed' | 'fail
   ).run(status, durationMs, id);
 }
 
-export function getOrchestrationRun(id: string): OrchestrationRun | undefined {
-  return getDb().prepare('SELECT * FROM orchestration_runs WHERE id = ?').get(id) as unknown as OrchestrationRun | undefined;
-}
-
 export function listOrchestrationRuns(parentSessionId: string): OrchestrationRun[] {
   return getDb().prepare(
     'SELECT * FROM orchestration_runs WHERE parent_session_id = ? ORDER BY created_at DESC'
   ).all(parentSessionId) as unknown as OrchestrationRun[];
 }
 
-export interface SubagentRun {
+interface SubagentRun {
   id: string;
   run_id: string;
   session_id: string;
@@ -357,16 +343,6 @@ export function updateSubagentRunStatus(
 
   params.push(id);
   db.prepare(`UPDATE subagent_runs SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-}
-
-export function getSubagentRun(id: string): SubagentRun | undefined {
-  return getDb().prepare('SELECT * FROM subagent_runs WHERE id = ?').get(id) as unknown as SubagentRun | undefined;
-}
-
-export function listSubagentRuns(runId: string): SubagentRun[] {
-  return getDb().prepare(
-    'SELECT * FROM subagent_runs WHERE run_id = ? ORDER BY created_at'
-  ).all(runId) as unknown as SubagentRun[];
 }
 
 export function getLatestCompaction(sessionId: string): Compaction | undefined {

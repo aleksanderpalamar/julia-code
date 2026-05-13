@@ -23,6 +23,3 @@ export function logMcp(line: string): void {
   }
 }
 
-export function getMcpLogPath(): string {
-  return LOG_PATH;
-}

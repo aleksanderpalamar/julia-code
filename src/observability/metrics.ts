@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { getDb } from '../session/db.js';
 import { getObservabilityLogPath, type ObservabilityEvent } from './logger.js';
 
-export interface OrchestrationMetrics {
+interface OrchestrationMetrics {
   totalRuns: number;
   completedRuns: number;
   failedRuns: number;
@@ -11,7 +11,7 @@ export interface OrchestrationMetrics {
   avgSubtaskCount: number | null;
 }
 
-export interface SubagentMetrics {
+interface SubagentMetrics {
   totalTasks: number;
   completedTasks: number;
   failedTasks: number;
@@ -25,7 +25,7 @@ export interface SubagentMetrics {
   }>;
 }
 
-export interface LoopMetrics {
+interface LoopMetrics {
   totalLoops: number;
   avgIterations: number | null;
   maxIterations: number | null;
@@ -34,7 +34,7 @@ export interface LoopMetrics {
   iterationHistogram: Record<string, number>;
 }
 
-export interface ToolMetrics {
+interface ToolMetrics {
   totalCalls: number;
   perTool: Record<string, {
     calls: number;
@@ -43,7 +43,7 @@ export interface ToolMetrics {
   }>;
 }
 
-export interface PlannerMetrics {
+interface PlannerMetrics {
   total: number;
   byVia: Record<'heuristic' | 'llm' | 'cache', number>;
   cacheHitRate: number | null;
@@ -63,7 +63,7 @@ function avg(values: number[]): number | null {
   return Math.round(sum / values.length);
 }
 
-export function computeOrchestrationMetrics(): OrchestrationMetrics {
+function computeOrchestrationMetrics(): OrchestrationMetrics {
   const db = getDb();
   const rows = db.prepare(
     'SELECT status, duration_ms, subtask_count FROM orchestration_runs'
@@ -84,7 +84,7 @@ export function computeOrchestrationMetrics(): OrchestrationMetrics {
   };
 }
 
-export function computeSubagentMetrics(): SubagentMetrics {
+function computeSubagentMetrics(): SubagentMetrics {
   const db = getDb();
   const rows = db.prepare(
     'SELECT model, status, duration_ms FROM subagent_runs'

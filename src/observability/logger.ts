@@ -57,8 +57,6 @@ export type ObservabilityEvent =
       tokensUsed?: number;
     };
 
-export type ObservabilityEventType = ObservabilityEvent['type'];
-
 function getLogDir(): string {
   const override = process.env.JULIA_LOG_DIR;
   if (override) return override;

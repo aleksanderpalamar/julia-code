@@ -2,7 +2,7 @@ import { getConfig } from '../../config/index.js';
 import { runOrchestration, type OrchestrationEventSink } from '../orchestrator/index.js';
 import { maybeCompact } from '../compactor.js';
 
-export function shouldAutoOrchestrate(excludeTools?: string[]): boolean {
+function shouldAutoOrchestrate(excludeTools?: string[]): boolean {
   const config = getConfig();
   return config.acpEnabled
     && config.acpAutoOrchestrate

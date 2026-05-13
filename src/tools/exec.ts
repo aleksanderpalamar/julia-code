@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import type { ToolDefinition, ToolContext } from './types.js';
+import type { ToolDefinition } from './types.js';
 import { getActiveToolContext } from './registry.js';
 import { buildSafeEnv } from '../security/permissions.js';
 
@@ -36,7 +36,7 @@ export const execTool: ToolDefinition = {
         success: false,
         output: '',
         error:
-          'Comando bloqueado: não é possível executar `juju` como subprocesso. Isso dispara o bootstrap da Julia em um child sem TTY, que reescreve ~/.juliacode/settings.json (perdendo mcpServers e trustedDirectories) e crasha em "Raw mode is not supported". Use os slash commands da TUI (/mcp, /model, /trust) ou peça ao usuário executar manualmente.',
+          "Command blocked: cannot be executed. `juju` as a subprocess. This triggers Julia's bootstrap in a child without a TTY, which rewrites ~/.juliacode/settings.json (losing mcpServers and trustedDirectories) and crashes with \"Raw mode is not supported\". Use the TUI slash commands (/mcp, /model, /trust) or have the user run it manually.",
       };
     }
 

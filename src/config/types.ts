@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const SemanticMemorySchema = z.object({
+const SemanticMemorySchema = z.object({
   enabled: z.boolean().default(false),
   provider: z.enum(['ollama', 'null']).default('ollama'),
   embeddingModel: z.string().default('nomic-embed-text'),
@@ -23,8 +23,6 @@ export const SemanticMemorySchema = z.object({
   availabilityCheckTtlMs: 30_000,
   autoBackfillOnStart: false,
 });
-
-export type SemanticMemoryConfig = z.infer<typeof SemanticMemorySchema>;
 
 export const ConfigSchema = z.object({
   ollamaHost: z.string().default('http://localhost:11434'),
@@ -52,7 +50,7 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-export const SettingsModelSchema = z.object({
+const SettingsModelSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
   contextWindow: z.number().optional(),
@@ -60,7 +58,7 @@ export const SettingsModelSchema = z.object({
   supportsTools: z.boolean().optional(),
 });
 
-export const McpServerConfigSchema = z.object({
+const McpServerConfigSchema = z.object({
   command: z.string(),
   args: z.array(z.string()).default([]),
   env: z.record(z.string()).optional(),

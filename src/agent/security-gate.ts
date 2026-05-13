@@ -6,13 +6,13 @@ import {
 } from '../security/permissions.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 
-export type GateOutcome =
+type GateOutcome =
   | { kind: 'blocked'; reason: string }
   | { kind: 'denied' }
   | { kind: 'allowed' }
   | { kind: 'approve_all' };
 
-export interface GateInput {
+interface GateInput {
   toolName: string;
   args: Record<string, unknown>;
   allowRules: AllowRule[];

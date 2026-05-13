@@ -2,7 +2,7 @@ import { buildSharedContextSnapshot } from '../compactor.js';
 import type { OrchestrationDeps, PlannedSubtask } from './types.js';
 import { executeSubagents } from './subagent-runner.js';
 
-export interface WorkflowResult {
+interface WorkflowResult {
   subtasks: PlannedSubtask[];
   resultLines: string[];
   completed: number;

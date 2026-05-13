@@ -16,7 +16,7 @@ import { maybeAutoOrchestrate, maybeRunCompaction } from './loop/workflow-decisi
 
 export type { AgentEvents, OrchestrationProgress };
 
-export interface AgentLoopOptions {
+interface AgentLoopOptions {
   maxIterations?: number;
   excludeTools?: string[];
 }

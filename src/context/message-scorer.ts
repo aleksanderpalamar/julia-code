@@ -1,7 +1,7 @@
 import type { Message } from '../session/manager.js';
 import { estimateDbMessageTokens } from './token-counter.js';
 
-export function scoreMessage(msg: Message, isFirstUserMessage: boolean): number {
+function scoreMessage(msg: Message, isFirstUserMessage: boolean): number {
   if (isFirstUserMessage && msg.role === 'user') return 1.0;
 
   switch (msg.role) {

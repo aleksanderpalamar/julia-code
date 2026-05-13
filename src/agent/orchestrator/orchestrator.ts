@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { maybeGenerateTitle } from '../title-generator.js';
-import type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress } from './types.js';
+import type { OrchestrationDeps } from './types.js';
 import { planSubtasks } from './planner.js';
 import { executeOrchestrationWorkflow } from './workflow.js';
 import { synthesizeFailureReport } from './synthesis.js';
@@ -15,8 +15,6 @@ import {
   buildResultsText,
   buildFinalOutput,
 } from './report-builder.js';
-
-export type { OrchestrationDeps, OrchestrationEventSink, OrchestrationProgress };
 
 export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean> {
   const { sessionId, userMessage, model, emit } = deps;

@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { getSettingsPath } from './index.js';
 import { logMcp } from '../mcp/logger.js';
 
-export type RawSettings = Record<string, any>;
+type RawSettings = Record<string, any>;
 
 export function readRawSettings(): RawSettings {
   const path = getSettingsPath();
@@ -13,7 +13,7 @@ export function readRawSettings(): RawSettings {
     text = readFileSync(path, 'utf-8');
   } catch (err) {
     logMcp(
-      `[config] Falha ao ler ${path}: ${err instanceof Error ? err.message : String(err)}`
+      `[config] Failed to read ${path}: ${err instanceof Error ? err.message : String(err)}`
     );
     throw err;
   }
@@ -22,13 +22,13 @@ export function readRawSettings(): RawSettings {
     return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
   } catch (err) {
     logMcp(
-      `[config] Falha ao parsear ${path}: ${err instanceof Error ? err.message : String(err)}. Atualização ignorada para evitar perda de dados.`
+      `[config] Parsing failed. ${path}: ${err instanceof Error ? err.message : String(err)}. Update skipped to avoid data loss.`
     );
     throw err;
   }
 }
 
-export function writeRawSettings(raw: RawSettings): void {
+function writeRawSettings(raw: RawSettings): void {
   const path = getSettingsPath();
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(raw, null, 2), 'utf-8');

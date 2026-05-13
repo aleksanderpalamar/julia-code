@@ -1,6 +1,6 @@
 import { getConfig } from '../config/index.js';
 
-export interface ModelInfo {
+interface ModelInfo {
   name: string;
   contextLength: number;
   capabilities: string[];
@@ -9,7 +9,7 @@ export interface ModelInfo {
 const DEFAULT_CONTEXT_LENGTH = 4096;
 const cache = new Map<string, ModelInfo>();
 
-export async function getModelInfo(model: string): Promise<ModelInfo> {
+async function getModelInfo(model: string): Promise<ModelInfo> {
   const cached = cache.get(model);
   if (cached) return cached;
 
@@ -43,10 +43,6 @@ export async function getContextLength(model: string): Promise<number> {
 export async function supportsTools(model: string): Promise<boolean> {
   const info = await getModelInfo(model);
   return info.capabilities.includes('tools');
-}
-
-export function clearModelInfoCache(): void {
-  cache.clear();
 }
 
 function extractContextLength(data: Record<string, unknown>): number | null {

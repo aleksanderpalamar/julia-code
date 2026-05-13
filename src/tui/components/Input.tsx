@@ -50,7 +50,7 @@ export function Input({
   );
 
   useInput(
-    (input, key) => {
+    (_input, key) => {
       if (!showMenu || filteredCommands.length === 0) return;
 
       if (key.upArrow) {

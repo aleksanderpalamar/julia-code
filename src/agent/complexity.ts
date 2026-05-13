@@ -1,4 +1,4 @@
-export interface ComplexitySignal {
+interface ComplexitySignal {
   reason: string;
   length: number;
   numberedItems: number;
@@ -8,7 +8,7 @@ export interface ComplexitySignal {
   hasBatchKeyword: boolean;
 }
 
-export interface ComplexityResult {
+interface ComplexityResult {
   complex: boolean;
   signals: ComplexitySignal;
 }

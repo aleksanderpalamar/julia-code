@@ -6,14 +6,14 @@ import { getProjectDir } from '../config/workspace.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { computeBudget, type ContextBudget } from '../context/budget.js';
-import { estimateMessagesTokens, estimateDbMessageTokens } from '../context/token-counter.js';
+import { estimateDbMessageTokens } from '../context/token-counter.js';
 import { extractTaskAnchor, formatTaskAnchor } from '../context/task-anchor.js';
 import { selectMessagesForRetention } from '../context/message-scorer.js';
 import { deserializeCompaction, formatCompactionForContext } from '../context/compaction.js';
-import { assessHealth, getContextWarningMessage, shouldEmergencyCompact, getEmergencyKeepCount } from '../context/health.js';
+import { assessHealth, getContextWarningMessage } from '../context/health.js';
 import { prepareMemoryContext } from '../memory/pipeline.js';
 
-export interface BuildContextOptions {
+interface BuildContextOptions {
   planMode?: boolean;
   temperament?: string;
   iteration?: number;
@@ -21,7 +21,7 @@ export interface BuildContextOptions {
   extraSystemContent?: string;
 }
 
-export interface BuildContextResult {
+interface BuildContextResult {
   messages: ChatMessage[];
   budget: ContextBudget;
   health: ReturnType<typeof assessHealth>;
@@ -33,7 +33,6 @@ export async function buildContext(
   options?: BuildContextOptions,
 ): Promise<BuildContextResult> {
   const messages: ChatMessage[] = [];
-  const config = getConfig();
 
   const systemContent = buildSystemPrompt(options);
   if (systemContent) {
@@ -174,7 +173,7 @@ export async function getCompactableMessages(
 
 export async function getEmergencyCompactableMessages(
   sessionId: string,
-  model: string,
+  _model: string,
   keepCount: number,
 ): Promise<{ messages: Message[]; lastId: number } | null> {
   const compaction = getLatestCompaction(sessionId);

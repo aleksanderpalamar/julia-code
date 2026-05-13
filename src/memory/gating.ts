@@ -1,6 +1,6 @@
 import type { GatingDecision } from './types.js';
 
-export interface GatingConfig {
+interface GatingConfig {
   customGate?: (input: string) => GatingDecision | null | undefined;
 }
 

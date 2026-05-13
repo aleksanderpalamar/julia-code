@@ -1,7 +1,7 @@
 import type { EmbeddingProvider } from './provider.js';
 import { EmbeddingProviderError } from './provider.js';
 
-export interface OllamaProviderOptions {
+interface OllamaProviderOptions {
   host: string;
   model: string;
   availabilityTimeoutMs?: number;

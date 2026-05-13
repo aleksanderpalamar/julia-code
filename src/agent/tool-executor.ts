@@ -5,7 +5,7 @@ import { maybeDeterministicRetry } from './retry.js';
 import { computeResultLimit } from './tool-execution/result-limiter.js';
 import { processToolResult } from './tool-execution/result-processor.js';
 
-export interface ExecutedTool {
+interface ExecutedTool {
   toolName: string;
   success: boolean;
   resultText: string;
@@ -13,7 +13,7 @@ export interface ExecutedTool {
   deterministicRetryApplied: boolean;
 }
 
-export interface RunToolCallInput {
+interface RunToolCallInput {
   toolName: string;
   args: Record<string, unknown>;
   budget: ContextBudget | null;

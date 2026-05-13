@@ -1,6 +1,6 @@
 import { executeTool } from '../tools/registry.js';
 
-export interface DeterministicRetryResult {
+interface DeterministicRetryResult {
   attempted: string;
   hint: string;
 }
