@@ -47,10 +47,6 @@ export function getSettingsPath(): string {
   return SETTINGS_PATH;
 }
 
-export function getSettings(): Settings | null {
-  return _settings ?? loadSettings();
-}
-
 export function loadConfig(): Config {
   if (_config) return _config;
 
@@ -109,5 +105,3 @@ export function reloadConfig(): Config {
   _settings = null;
   return loadConfig();
 }
-
-export type { Config };

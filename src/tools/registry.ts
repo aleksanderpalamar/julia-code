@@ -30,10 +30,6 @@ export function registerTool(tool: ToolDefinition): void {
   tools.set(tool.name, tool);
 }
 
-export function getTool(name: string): ToolDefinition | undefined {
-  return tools.get(name);
-}
-
 export function getToolSchemas(): ToolSchema[] {
   return Array.from(tools.values()).map(toolToSchema);
 }
