@@ -73,6 +73,42 @@ describe('evaluateToolCall / approval flow', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
+  it('allows dangerous tools when preApproved is true (PreToolUse hook approve)', async () => {
+    vi.mocked(isBlockedCommand).mockReturnValue(false);
+    vi.mocked(getToolRisk).mockReturnValue('dangerous');
+
+    const requestApproval = vi.fn();
+    const outcome = await evaluateToolCall({
+      toolName: 'exec',
+      args: { command: 'ls' },
+      allowRules: [],
+      approvedAllForSession: makeRef(),
+      requestApproval,
+      preApproved: true,
+    });
+
+    expect(outcome.kind).toBe('allowed');
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(matchesAllowRule).not.toHaveBeenCalled();
+  });
+
+  it('preApproved still respects the hardcoded blocklist', async () => {
+    vi.mocked(isBlockedCommand).mockReturnValue(true);
+
+    const requestApproval = vi.fn();
+    const outcome = await evaluateToolCall({
+      toolName: 'exec',
+      args: { command: 'rm -rf /' },
+      allowRules: [],
+      approvedAllForSession: makeRef(),
+      requestApproval,
+      preApproved: true,
+    });
+
+    expect(outcome.kind).toBe('blocked');
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
   it('allows dangerous tools when approvedAllForSession is set', async () => {
     vi.mocked(isBlockedCommand).mockReturnValue(false);
     vi.mocked(getToolRisk).mockReturnValue('dangerous');

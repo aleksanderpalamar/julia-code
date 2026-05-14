@@ -160,6 +160,16 @@ describe('runHook / JSON stdout', () => {
     expect(outcome.reason).toBe('no shell today');
   });
 
+  it('parses decision=approve from JSON output and propagates to aggregate', async () => {
+    vi.mocked(getSettings).mockReturnValue({
+      hooks: { PreToolUse: [{ matcher: 'exec', hooks: [{ type: 'command', command: 'allowlist' }] }] },
+    } as never);
+    vi.mocked(execSync).mockReturnValue(JSON.stringify({ decision: 'approve', reason: 'on the allowlist' }));
+    const outcome = await runHook('PreToolUse', basePreToolUse(), { matchKey: 'exec' });
+    expect(outcome.decision).toBe('approve');
+    expect(outcome.reason).toBe('on the allowlist');
+  });
+
   it('extracts hookSpecificOutput.additionalContext', async () => {
     vi.mocked(getSettings).mockReturnValue({
       hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'inject' }] }] },
@@ -227,6 +237,50 @@ describe('runHook / aggregation', () => {
     const outcome = await runHook('PreToolUse', basePreToolUse(), { matchKey: 'exec' });
     expect(outcome.decision).toBe('block');
     expect(execSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('block beats approve when both fire', async () => {
+    vi.mocked(getSettings).mockReturnValue({
+      hooks: {
+        PreToolUse: [
+          { matcher: 'exec', hooks: [
+            { type: 'command', command: 'approver' },
+            { type: 'command', command: 'denier' },
+          ]},
+        ],
+      },
+    } as never);
+    vi.mocked(execSync)
+      .mockReturnValueOnce(JSON.stringify({ decision: 'approve', reason: 'ok' }))
+      .mockImplementationOnce(() => {
+        const err = new Error('blocked') as Error & { status: number; stdout: string; stderr: string };
+        err.status = 2;
+        err.stdout = '';
+        err.stderr = 'nope';
+        throw err;
+      });
+    const outcome = await runHook('PreToolUse', basePreToolUse(), { matchKey: 'exec' });
+    expect(outcome.decision).toBe('block');
+    expect(outcome.reason).toBe('nope');
+  });
+
+  it('approve from one hook survives pass-through from another', async () => {
+    vi.mocked(getSettings).mockReturnValue({
+      hooks: {
+        PreToolUse: [
+          { matcher: 'exec', hooks: [
+            { type: 'command', command: 'approver' },
+            { type: 'command', command: 'silent' },
+          ]},
+        ],
+      },
+    } as never);
+    vi.mocked(execSync)
+      .mockReturnValueOnce(JSON.stringify({ decision: 'approve', reason: 'ok' }))
+      .mockReturnValueOnce('');
+    const outcome = await runHook('PreToolUse', basePreToolUse(), { matchKey: 'exec' });
+    expect(outcome.decision).toBe('approve');
+    expect(outcome.reason).toBe('ok');
   });
 
   it('concatenates additionalContext from multiple hooks', async () => {

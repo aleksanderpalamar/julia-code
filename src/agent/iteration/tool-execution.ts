@@ -70,6 +70,7 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
       allowRules,
       approvedAllForSession: approvedAllRef,
       requestApproval: wrappedRequestApproval,
+      preApproved: preHook.decision === 'approve',
     });
     if (gate.kind === 'blocked') {
       addMessage(sessionId, 'tool', gate.reason, undefined, tc.id);

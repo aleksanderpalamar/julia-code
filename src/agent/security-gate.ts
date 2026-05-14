@@ -18,13 +18,18 @@ interface GateInput {
   allowRules: AllowRule[];
   approvedAllForSession: { current: boolean };
   requestApproval: (toolName: string, args: Record<string, unknown>) => Promise<ApprovalResult>;
+  preApproved?: boolean;
 }
 
 export async function evaluateToolCall(input: GateInput): Promise<GateOutcome> {
-  const { toolName, args, allowRules, approvedAllForSession, requestApproval } = input;
+  const { toolName, args, allowRules, approvedAllForSession, requestApproval, preApproved } = input;
 
   if (toolName === 'exec' && isBlockedCommand(args.command as string)) {
     return { kind: 'blocked', reason: 'Operação bloqueada: este comando está na blocklist de segurança.' };
+  }
+
+  if (preApproved) {
+    return { kind: 'allowed' };
   }
 
   const risk = getToolRisk(toolName);

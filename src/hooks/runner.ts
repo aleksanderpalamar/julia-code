@@ -54,6 +54,9 @@ function mergeOutcome(into: HookOutcome, next: HookOutcome, contextParts: string
   if (next.decision === 'block' && into.decision !== 'block') {
     into.decision = 'block';
     into.reason = next.reason;
+  } else if (next.decision === 'approve' && into.decision === 'none') {
+    into.decision = 'approve';
+    into.reason = next.reason;
   }
   if (next.continue === false) {
     into.continue = false;
