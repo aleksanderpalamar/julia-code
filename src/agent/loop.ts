@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { getToolSchemas } from '../tools/registry.js';
-import { addMessage } from '../session/manager.js';
+import { addMessage, getMessageCount } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
@@ -13,12 +13,16 @@ import type { AgentEvents, OrchestrationProgress } from './loop/events.js';
 import { createIterationSink, createOrchestrationSink } from './loop/event-bridge.js';
 import { requestApproval, SessionApprovalState } from './loop/approval-gate.js';
 import { maybeAutoOrchestrate, maybeRunCompaction } from './loop/workflow-decisions.js';
+import { runHook } from '../hooks/runner.js';
 
 export type { AgentEvents, OrchestrationProgress };
+
+const sessionStartFired = new Set<string>();
 
 interface AgentLoopOptions {
   maxIterations?: number;
   excludeTools?: string[];
+  isSubagent?: boolean;
 }
 
 export class AgentLoop extends EventEmitter<AgentEvents> {
@@ -86,8 +90,40 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
     const approvedAllRef = this.approval.createIterationRef();
     let state: IterationState = { iteration: 0, switchedToCloud: false, lastHadToolCalls: false, retryCount: 0 };
+    let stopHookActive = false;
 
     try {
+      if (!this.options.isSubagent && !sessionStartFired.has(sessionId)) {
+        sessionStartFired.add(sessionId);
+        const source: 'startup' | 'resume' = getMessageCount(sessionId) > 0 ? 'resume' : 'startup';
+        const startHook = await runHook('SessionStart', {
+          session_id: sessionId,
+          cwd: process.cwd(),
+          hook_event_name: 'SessionStart',
+          source,
+        });
+        if (startHook.additionalContext) {
+          addMessage(sessionId, 'system', `[SessionStart hook context]\n${startHook.additionalContext}`);
+        }
+      }
+
+      if (!this.options.isSubagent) {
+        const submitHook = await runHook('UserPromptSubmit', {
+          session_id: sessionId,
+          cwd: process.cwd(),
+          hook_event_name: 'UserPromptSubmit',
+          prompt: userMessage,
+        });
+        if (submitHook.decision === 'block') {
+          this.emit('error', submitHook.reason ?? 'Blocked by UserPromptSubmit hook');
+          this.running = false;
+          return;
+        }
+        if (submitHook.additionalContext) {
+          userMessage = `${submitHook.additionalContext}\n\n${userMessage}`;
+        }
+      }
+
       addMessage(sessionId, 'user', userMessage, undefined, undefined, images);
 
       this.emit('thinking');
@@ -104,8 +140,20 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         return;
       }
 
-      if (await maybeRunCompaction(sessionId, auxModel)) {
-        this.emit('compacting');
+      const preCompact = await runHook('PreCompact', {
+        session_id: sessionId,
+        cwd: process.cwd(),
+        hook_event_name: 'PreCompact',
+        trigger: 'auto',
+        custom_instructions: '',
+      });
+      if (preCompact.decision !== 'block') {
+        if (preCompact.additionalContext) {
+          addMessage(sessionId, 'system', `[PreCompact hook context]\n${preCompact.additionalContext}`);
+        }
+        if (await maybeRunCompaction(sessionId, auxModel)) {
+          this.emit('compacting');
+        }
       }
 
       const deps: IterationDeps = {
@@ -134,6 +182,20 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         this.approval.syncFromRef(approvedAllRef);
 
         if (outcome.kind === 'done') {
+          const stopEvent = this.options.isSubagent ? 'SubagentStop' : 'Stop';
+          const stopHook = await runHook(stopEvent, {
+            session_id: sessionId,
+            cwd: process.cwd(),
+            hook_event_name: stopEvent,
+            stop_hook_active: stopHookActive,
+          });
+          if (stopHook.decision === 'block' && !stopHookActive) {
+            stopHookActive = true;
+            const reason = stopHook.reason ?? `${stopEvent} hook requested continuation.`;
+            addMessage(sessionId, 'system', `[${stopEvent} hook] ${reason}`);
+            state = { ...state, iteration: state.iteration + 1 };
+            continue;
+          }
           log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'done' });
           this.emit('done', outcome.fullText);
           void maybeGenerateTitle(sessionId, auxModel, userMessage, outcome.fullText).then(title => {

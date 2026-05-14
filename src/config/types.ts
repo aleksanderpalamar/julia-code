@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HooksSchema } from '../hooks/schema.js';
 
 const SemanticMemorySchema = z.object({
   enabled: z.boolean().default(false),
@@ -117,6 +118,7 @@ export const SettingsSchema = z.object({
       pattern: z.string(),
     })).default([]),
   }).optional(),
+  hooks: HooksSchema,
 }).passthrough();
 
 export type Settings = z.infer<typeof SettingsSchema>;

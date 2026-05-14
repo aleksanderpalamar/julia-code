@@ -88,6 +88,7 @@ export function runTask(deps: RunTaskDeps): void {
   const agent = new AgentLoop({
     maxIterations: config.acpSubagentMaxIterations,
     excludeTools: ['subagent'],
+    isSubagent: true,
   });
   agents.set(task.id, agent);
 

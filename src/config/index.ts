@@ -48,6 +48,10 @@ export function getSettingsPath(): string {
   return SETTINGS_PATH;
 }
 
+export function getSettings(): Settings | null {
+  return loadSettings();
+}
+
 export function loadConfig(): Config {
   if (_config) return _config;
 

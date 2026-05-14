@@ -218,6 +218,44 @@ Behavior:
 - Each `SKILL.md` is limited to 50 KB and is scanned for prompt-injection patterns before being loaded; rejected files are logged and skipped.
 - Subdirectories without a `SKILL.md` are skipped and logged.
 
+### Hooks (`~/.juliacode/settings.json`)
+
+Configure shell commands that fire at specific points of the agent loop. The schema mirrors Claude Code's hooks system 1:1.
+
+> ⚠️ Hooks run arbitrary shell commands with your user's permissions on every matching event. Audit any hook you add. Julia does not sandbox them.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "exec",
+        "hooks": [
+          { "type": "command", "command": "audit-shell.sh", "timeout": 5000 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "command": "echo 'Reminder: review security'" }] }
+    ]
+  }
+}
+```
+
+Supported events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `Notification`, `PreCompact`.
+
+Each hook receives a JSON payload on stdin (`session_id`, `cwd`, `hook_event_name`, plus event-specific fields like `tool_name`, `tool_input`, `prompt`, `source`, etc.). Control Julia via:
+
+- **Exit code 0** — success. If stdout is JSON `{ "decision": "block" | "approve", "reason": "...", "hookSpecificOutput": { "additionalContext": "..." } }`, Julia honors it. For `UserPromptSubmit`, `SessionStart`, and `PreCompact`, raw stdout is also accepted and injected as additional context.
+- **Exit code 2** — blocking error. `stderr` becomes the block reason and is surfaced to the agent.
+- **Other non-zero** — non-blocking error. Logged via the MCP log channel; agent continues.
+
+The `matcher` field is a regex tested against the tool name for `PreToolUse` / `PostToolUse`. Omit it (or use `*`) to match every tool. For non-tool events the field has no effect.
+
+Anti-loop guard: when a `Stop` or `SubagentStop` hook returns `decision: "block"`, Julia re-enters the loop once and re-fires the hook with `stop_hook_active: true`. The hook is expected to respect that flag on the second pass.
+
+The Julia environment exposes `JULIA_HOOK=1` and `JULIA_HOOK_EVENT=<event>` to every hook process — useful for detecting recursion or branching logic. Default timeout per command is 60 s and can be overridden with the `timeout` field (in ms). `~/.juliacode/settings.json` itself is read-only for Julia's own tools, so the hooks block must be edited by hand — the same workflow used for `mcpServers`.
+
 ### Semantic memory (optional)
 
 With `memory.semantic.enabled: false` (default), Julia injects the 30 most-recent memories into the system prompt, just like before.
