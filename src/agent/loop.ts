@@ -140,21 +140,21 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         return;
       }
 
-      const preCompact = await runHook('PreCompact', {
-        session_id: sessionId,
-        cwd: process.cwd(),
-        hook_event_name: 'PreCompact',
-        trigger: 'auto',
-        custom_instructions: '',
-      });
-      if (preCompact.decision !== 'block') {
+      const compacted = await maybeRunCompaction(sessionId, auxModel, async () => {
+        const preCompact = await runHook('PreCompact', {
+          session_id: sessionId,
+          cwd: process.cwd(),
+          hook_event_name: 'PreCompact',
+          trigger: 'auto',
+          custom_instructions: '',
+        });
+        if (preCompact.decision === 'block') return false;
         if (preCompact.additionalContext) {
           addMessage(sessionId, 'system', `[PreCompact hook context]\n${preCompact.additionalContext}`);
         }
-        if (await maybeRunCompaction(sessionId, auxModel)) {
-          this.emit('compacting');
-        }
-      }
+        return true;
+      });
+      if (compacted) this.emit('compacting');
 
       const deps: IterationDeps = {
         sessionId,

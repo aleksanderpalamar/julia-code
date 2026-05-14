@@ -8,9 +8,15 @@ import {
   type StructuredCompaction,
 } from '../context/compaction.js';
 
-export async function maybeCompact(sessionId: string, model: string): Promise<boolean> {
+export async function maybeCompact(
+  sessionId: string,
+  model: string,
+  beforeCompact?: () => Promise<boolean>,
+): Promise<boolean> {
   const compactable = await getCompactableMessages(sessionId, model);
   if (!compactable) return false;
+
+  if (beforeCompact && !(await beforeCompact())) return false;
 
   try {
     const existingCompaction = getLatestCompaction(sessionId);

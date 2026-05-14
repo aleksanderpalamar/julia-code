@@ -25,6 +25,10 @@ export async function maybeAutoOrchestrate(input: {
   });
 }
 
-export async function maybeRunCompaction(sessionId: string, auxModel: string): Promise<boolean> {
-  return await maybeCompact(sessionId, auxModel);
+export async function maybeRunCompaction(
+  sessionId: string,
+  auxModel: string,
+  beforeCompact?: () => Promise<boolean>,
+): Promise<boolean> {
+  return await maybeCompact(sessionId, auxModel, beforeCompact);
 }
