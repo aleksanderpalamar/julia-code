@@ -182,6 +182,42 @@ When Julia Code starts, it connects to each server and automatically registers t
 }
 ```
 
+### Custom skills (`~/.juliacode/skills/`)
+
+Drop your own skills into `~/.juliacode/skills/` to extend Julia. They are loaded on every session, globally — no need to duplicate per project.
+
+Layout follows the same pattern as Claude Code: one directory per skill, with a `SKILL.md` file inside.
+
+```
+~/.juliacode/skills/
+├── review-pr/
+│   └── SKILL.md
+└── deploy-checklist/
+    └── SKILL.md
+```
+
+Each `SKILL.md` is a Markdown document with optional YAML frontmatter:
+
+```markdown
+---
+name: review-pr
+description: Review a pull request against the team conventions
+when_to_use: User asks to "review PR" or pastes a diff
+argument_hint: <pr-number-or-url>
+user_invocable: true
+---
+
+Your skill prompt body goes here. Use $ARGUMENTS to inject the user-provided argument.
+```
+
+Behavior:
+- The skill name comes from the `name` frontmatter; if absent, it defaults to the directory name.
+- Skills with `user_invocable: true` show up as slash commands (e.g. `/review-pr`).
+- All custom skills are loaded into the system prompt under a `User-Defined Skills (LOWER TRUST)` section — they cannot override system instructions.
+- On name collision with a built-in default skill, the default wins.
+- Each `SKILL.md` is limited to 50 KB and is scanned for prompt-injection patterns before being loaded; rejected files are logged and skipped.
+- Subdirectories without a `SKILL.md` are skipped and logged.
+
 ### Semantic memory (optional)
 
 With `memory.semantic.enabled: false` (default), Julia injects the 30 most-recent memories into the system prompt, just like before.
