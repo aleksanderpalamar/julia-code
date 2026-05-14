@@ -7,6 +7,7 @@ import { addMessage } from '../../session/manager.js';
 import { log } from '../../observability/logger.js';
 import { evaluateToolCall } from '../security-gate.js';
 import { runToolCall } from '../tool-executor.js';
+import { runHook } from '../../hooks/runner.js';
 
 interface ToolExecutionEmitter {
   toolResult(name: string, text: string, success: boolean): void;
@@ -36,12 +37,39 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     const toolName = tc.function.name;
     const toolArgs = tc.function.arguments;
 
+    const preHook = await runHook(
+      'PreToolUse',
+      {
+        session_id: sessionId,
+        cwd: process.cwd(),
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: toolArgs,
+      },
+      { matchKey: toolName },
+    );
+    if (preHook.decision === 'block') {
+      const reason = preHook.reason ?? 'Blocked by PreToolUse hook';
+      addMessage(sessionId, 'tool', reason, undefined, tc.id);
+      emit.toolResult(toolName, reason, false);
+      continue;
+    }
+
+    const wrappedRequestApproval = async (name: string, args: Record<string, unknown>) => {
+      await runHook('Notification', {
+        session_id: sessionId,
+        cwd: process.cwd(),
+        hook_event_name: 'Notification',
+        message: `Julia needs approval to run tool: ${name}`,
+      });
+      return requestApproval(name, args);
+    };
     const gate = await evaluateToolCall({
       toolName,
       args: toolArgs,
       allowRules,
       approvedAllForSession: approvedAllRef,
-      requestApproval,
+      requestApproval: wrappedRequestApproval,
     });
     if (gate.kind === 'blocked') {
       addMessage(sessionId, 'tool', gate.reason, undefined, tc.id);
@@ -49,7 +77,7 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
       continue;
     }
     if (gate.kind === 'denied') {
-      const resultText = 'Operação negada pelo usuário.';
+      const resultText = 'Operation denied by the user.';
       addMessage(sessionId, 'tool', resultText, undefined, tc.id);
       emit.toolResult(toolName, resultText, false);
       continue;
@@ -74,6 +102,23 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
 
     addMessage(sessionId, 'tool', executed.resultText, undefined, tc.id);
     emit.toolResult(toolName, executed.resultText, executed.success);
+
+    const postHook = await runHook(
+      'PostToolUse',
+      {
+        session_id: sessionId,
+        cwd: process.cwd(),
+        hook_event_name: 'PostToolUse',
+        tool_name: toolName,
+        tool_input: toolArgs,
+        tool_response: executed.resultText,
+        tool_success: executed.success,
+      },
+      { matchKey: toolName },
+    );
+    if (postHook.decision === 'block' && postHook.reason) {
+      addMessage(sessionId, 'system', `[PostToolUse hook] ${postHook.reason}`);
+    }
   }
 
   return { aborted: false };
