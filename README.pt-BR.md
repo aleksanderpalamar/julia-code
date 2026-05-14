@@ -182,6 +182,42 @@ Ao iniciar o Julia Code, ela conecta a cada servidor e registra as tools automat
 }
 ```
 
+### Skills customizadas (`~/.juliacode/skills/`)
+
+Coloque suas próprias skills em `~/.juliacode/skills/` para estender a Julia. Elas são carregadas em toda sessão, globalmente — não precisa duplicar por projeto.
+
+O layout segue o mesmo padrão do Claude Code: um diretório por skill, com um arquivo `SKILL.md` dentro.
+
+```
+~/.juliacode/skills/
+├── review-pr/
+│   └── SKILL.md
+└── deploy-checklist/
+    └── SKILL.md
+```
+
+Cada `SKILL.md` é um documento Markdown com frontmatter YAML opcional:
+
+```markdown
+---
+name: review-pr
+description: Revisar um pull request contra as convenções do time
+when_to_use: Quando o usuário pedir "revisar PR" ou colar um diff
+argument_hint: <numero-do-pr-ou-url>
+user_invocable: true
+---
+
+O corpo do prompt da skill vai aqui. Use $ARGUMENTS para injetar o argumento informado pelo usuário.
+```
+
+Comportamento:
+- O nome da skill vem do `name` do frontmatter; se ausente, é o nome do diretório.
+- Skills com `user_invocable: true` aparecem como slash commands (ex.: `/review-pr`).
+- Todas as skills customizadas entram no system prompt numa seção `User-Defined Skills (LOWER TRUST)` — elas não conseguem sobrescrever instruções do sistema.
+- Em caso de colisão de `name` com uma default embutida, a default ganha.
+- Cada `SKILL.md` é limitado a 50 KB e passa por scan de padrões de prompt injection antes de ser carregado; arquivos rejeitados são logados e ignorados.
+- Subdiretórios sem `SKILL.md` são ignorados e logados.
+
 ### Memória semântica (opcional)
 
 Com `memory.semantic.enabled: false` (default), a Julia injeta as 30 memórias mais recentes no system prompt — mesmo comportamento de antes.

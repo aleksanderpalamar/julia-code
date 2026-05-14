@@ -12,6 +12,7 @@ const SETTINGS_PATH = join(JULIA_HOME, 'settings.json');
 
 function ensureJuliaHome(): void {
   mkdirSync(join(JULIA_HOME, 'data'), { recursive: true });
+  mkdirSync(join(JULIA_HOME, 'skills'), { recursive: true });
 
   if (!existsSync(SETTINGS_PATH)) {
     const defaults = {

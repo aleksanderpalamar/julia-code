@@ -1,11 +1,13 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import { homedir } from 'node:os';
 import type { Skill, SkillFrontmatter } from './types.js';
 import { scanForInjection } from '../security/sanitize.js';
 import { logMcp } from '../mcp/logger.js';
 
 const DEFAULTS_DIR = new URL('defaults/', import.meta.url).pathname;
-const USER_SKILLS_DIR = join(process.cwd(), 'data', 'skills');
+const USER_SKILLS_DIR = join(homedir(), '.juliacode', 'skills');
+const USER_SKILL_FILENAME = 'SKILL.md';
 
 const MAX_SKILL_SIZE = 50 * 1024;
 
@@ -50,29 +52,35 @@ export function loadUserSkills(): Skill[] {
 
   const skills: Skill[] = [];
 
-  for (const file of readdirSync(USER_SKILLS_DIR)) {
-    if (!file.endsWith('.md')) continue;
+  for (const entry of readdirSync(USER_SKILLS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
 
-    const filePath = join(USER_SKILLS_DIR, file);
+    const skillName = entry.name;
+    const skillPath = join(USER_SKILLS_DIR, skillName, USER_SKILL_FILENAME);
 
-    const stat = statSync(filePath);
-    if (stat.size > MAX_SKILL_SIZE) {
-      logMcp(`[security] Skill "${file}" excede ${MAX_SKILL_SIZE} bytes — ignorado`);
+    if (!existsSync(skillPath)) {
+      logMcp(`[skills] "${skillName}/" não contém ${USER_SKILL_FILENAME} — ignorado`);
       continue;
     }
 
-    const raw = readFileSync(filePath, 'utf-8');
+    const stat = statSync(skillPath);
+    if (stat.size > MAX_SKILL_SIZE) {
+      logMcp(`[security] Skill "${skillName}/${USER_SKILL_FILENAME}" excede ${MAX_SKILL_SIZE} bytes — ignorado`);
+      continue;
+    }
+
+    const raw = readFileSync(skillPath, 'utf-8');
 
     const scan = scanForInjection(raw);
     if (scan.isSuspicious) {
       logMcp(
-        `[security] Skill "${file}" contém padrões suspeitos (${scan.detections.join(', ')}) — ignorado`
+        `[security] Skill "${skillName}/${USER_SKILL_FILENAME}" contém padrões suspeitos (${scan.detections.join(', ')}) — ignorado`
       );
       continue;
     }
 
     const { frontmatter, body } = parseFrontmatter(raw);
-    skills.push({ name: frontmatter.name ?? basename(file, '.md'), content: body, frontmatter });
+    skills.push({ name: frontmatter.name ?? skillName, content: body, frontmatter });
   }
 
   return skills;
