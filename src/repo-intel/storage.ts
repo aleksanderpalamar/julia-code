@@ -66,6 +66,25 @@ export function deleteChunksForFile(filePath: string): number {
   return Number(result.changes ?? 0);
 }
 
+export function deleteObsoleteChunksForFile(filePath: string, keepRanges: Array<[number, number]>): number {
+  const db = getDb();
+  if (keepRanges.length === 0) {
+    const result = db.prepare('DELETE FROM code_chunks WHERE file_path = ?').run(filePath);
+    return Number(result.changes ?? 0);
+  }
+  const pairExpr = keepRanges.map(() => '(? , ?)').join(',');
+  const params: SQLInputValue[] = [filePath];
+  for (const [s, e] of keepRanges) {
+    params.push(s, e);
+  }
+  const result = db.prepare(
+    `DELETE FROM code_chunks
+     WHERE file_path = ?
+       AND (start_line, end_line) NOT IN (VALUES ${pairExpr})`,
+  ).run(...params);
+  return Number(result.changes ?? 0);
+}
+
 export function deleteChunksNotIn(filePaths: string[]): number {
   if (filePaths.length === 0) {
     const result = getDb().prepare('DELETE FROM code_chunks').run();
@@ -109,6 +128,15 @@ export function getAllFilePaths(): string[] {
     'SELECT DISTINCT file_path FROM code_chunks ORDER BY file_path'
   ).all() as Array<{ file_path: string }>;
   return rows.map(r => r.file_path);
+}
+
+export function invalidateEmbeddingsNotMatchingModel(currentModel: string): number {
+  const result = getDb().prepare(
+    `UPDATE code_chunks
+       SET embedding = NULL, embedding_model = NULL
+       WHERE embedding_model IS NOT NULL AND embedding_model != ?`,
+  ).run(currentModel);
+  return Number(result.changes ?? 0);
 }
 
 export function isIndexEmpty(): boolean {

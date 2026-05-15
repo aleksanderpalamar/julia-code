@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 
 let testDb: DatabaseSync;
+let currentEmbeddingModel = "mock-embed";
 
 vi.mock("../src/config/index.js", () => ({
   getConfig: () => ({
     defaultModel: "test-model",
     dbPath: ":memory:",
+    memorySemantic: {
+      embeddingModel: currentEmbeddingModel,
+    },
   }),
 }));
 
@@ -48,7 +52,7 @@ const embedMock = vi.fn(async (_text: string) => {
 vi.mock("../src/memory/embeddings/index.js", () => ({
   getEmbeddingProvider: () => ({
     name: "mock",
-    model: "mock-embed",
+    get model() { return currentEmbeddingModel; },
     available: async () => true,
     embed: (t: string) => embedMock(t),
   }),
@@ -74,6 +78,7 @@ beforeEach(() => {
   isGitRepo = true;
   embedCalls = 0;
   embedMock.mockClear();
+  currentEmbeddingModel = "mock-embed";
 });
 
 describe("runIndex", () => {
@@ -144,5 +149,72 @@ describe("runIndex", () => {
     const result = await runIndex();
     expect(result.reason).toBe("not-a-repo");
     expect(countChunks()).toBe(0);
+  });
+
+  it("preserves embeddings for unchanged chunks within a mutated file", async () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= 200; i++) lines.push(`line ${i};`);
+    fakeFiles.set("src/big.ts", lines.join("\n"));
+    await runIndex();
+
+    const beforeChunks = getChunksByFile("src/big.ts");
+    expect(beforeChunks.length).toBeGreaterThan(1);
+    const initialEmbeds = embedMock.mock.calls.length;
+    expect(initialEmbeds).toBe(beforeChunks.length);
+    const lastChunk = beforeChunks[beforeChunks.length - 1];
+    const originalLastEmbedding = Buffer.from(lastChunk.embedding!);
+
+    lines[0] = "line 1; // changed";
+    fakeFiles.set("src/big.ts", lines.join("\n"));
+    embedMock.mockClear();
+    await runIndex();
+
+    const afterEmbeds = embedMock.mock.calls.length;
+    expect(afterEmbeds).toBeGreaterThan(0);
+    expect(afterEmbeds).toBeLessThan(beforeChunks.length);
+
+    const afterChunks = getChunksByFile("src/big.ts");
+    const lastAfter = afterChunks[afterChunks.length - 1];
+    expect(Buffer.from(lastAfter.embedding!).equals(originalLastEmbedding)).toBe(true);
+    expect(lastAfter.content).not.toContain("// changed");
+
+    const firstAfter = afterChunks[0];
+    expect(firstAfter.content).toContain("// changed");
+    expect(Buffer.from(firstAfter.embedding!).equals(originalLastEmbedding)).toBe(false);
+  });
+
+  it("re-embeds unchanged files when the embedding model changes", async () => {
+    fakeFiles.set("src/a.ts", "export const a = 1;");
+    fakeFiles.set("src/b.ts", "export const b = 2;");
+    await runIndex();
+    expect(embedMock).toHaveBeenCalledTimes(2);
+
+    const beforeA = getChunksByFile("src/a.ts")[0];
+    expect(beforeA.embedding_model).toBe("mock-embed");
+
+    currentEmbeddingModel = "mock-embed-v2";
+    embedMock.mockClear();
+    await runIndex();
+
+    expect(embedMock).toHaveBeenCalledTimes(2);
+    const afterA = getChunksByFile("src/a.ts")[0];
+    const afterB = getChunksByFile("src/b.ts")[0];
+    expect(afterA.embedding_model).toBe("mock-embed-v2");
+    expect(afterB.embedding_model).toBe("mock-embed-v2");
+    expect(afterA.embedding).not.toBeNull();
+    expect(afterB.embedding).not.toBeNull();
+  });
+
+  it("removes chunks whose ranges no longer exist when a file shrinks", async () => {
+    const longLines = Array.from({ length: 200 }, (_, i) => `line ${i + 1};`);
+    fakeFiles.set("src/big.ts", longLines.join("\n"));
+    await runIndex();
+    const longCount = getChunksByFile("src/big.ts").length;
+    expect(longCount).toBeGreaterThan(1);
+
+    fakeFiles.set("src/big.ts", longLines.slice(0, 30).join("\n"));
+    await runIndex();
+    const shortCount = getChunksByFile("src/big.ts").length;
+    expect(shortCount).toBe(1);
   });
 });

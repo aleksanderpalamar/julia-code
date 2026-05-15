@@ -3,15 +3,17 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { getProjectDir } from '../config/workspace.js';
 import { getEmbeddingProvider } from '../memory/embeddings/index.js';
+import { getConfig } from '../config/index.js';
 import { chunkContent } from './chunker.js';
 import { listIndexableFiles, languageFromPath, readFileSafe } from './file-scanner.js';
 import {
   upsertChunk,
-  deleteChunksForFile,
+  deleteObsoleteChunksForFile,
   deleteChunksNotIn,
   getFileHash,
   setIndexMeta,
   countChunks,
+  invalidateEmbeddingsNotMatchingModel,
 } from './storage.js';
 import { embedPendingBatch } from './embed-writer.js';
 import type { IndexProgress, IndexResult } from './types.js';
@@ -29,6 +31,16 @@ export async function runIndex(opts: RunIndexOptions = {}): Promise<IndexResult>
   const projectDir = getProjectDir();
 
   setIndexMeta('last_index_started_at', new Date().toISOString());
+
+  const currentModel = getConfig().memorySemantic?.embeddingModel ?? '';
+  if (currentModel) {
+    const invalidated = invalidateEmbeddingsNotMatchingModel(currentModel);
+    if (invalidated > 0) {
+      process.stderr.write(
+        `[repo-intel] embedding model changed; invalidated ${invalidated} stale embeddings\n`,
+      );
+    }
+  }
 
   const progress: IndexProgress = {
     phase: 'scanning',
@@ -79,7 +91,6 @@ export async function runIndex(opts: RunIndexOptions = {}): Promise<IndexResult>
       if (existing === fileHash) continue;
     }
 
-    deleteChunksForFile(rel);
     const language = languageFromPath(rel);
     const chunks = chunkContent(content);
 
@@ -96,6 +107,8 @@ export async function runIndex(opts: RunIndexOptions = {}): Promise<IndexResult>
       });
       progress.chunksInserted++;
     }
+    const keepRanges = chunks.map<[number, number]>(c => [c.startLine, c.endLine]);
+    deleteObsoleteChunksForFile(rel, keepRanges);
     filesIndexed++;
   }
 
