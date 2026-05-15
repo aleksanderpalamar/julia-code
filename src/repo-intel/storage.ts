@@ -130,6 +130,15 @@ export function getAllFilePaths(): string[] {
   return rows.map(r => r.file_path);
 }
 
+export function invalidateEmbeddingsNotMatchingModel(currentModel: string): number {
+  const result = getDb().prepare(
+    `UPDATE code_chunks
+       SET embedding = NULL, embedding_model = NULL
+       WHERE embedding_model IS NOT NULL AND embedding_model != ?`,
+  ).run(currentModel);
+  return Number(result.changes ?? 0);
+}
+
 export function isIndexEmpty(): boolean {
   return countChunks() === 0;
 }
