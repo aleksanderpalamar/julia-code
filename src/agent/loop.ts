@@ -14,6 +14,7 @@ import { createIterationSink, createOrchestrationSink } from './loop/event-bridg
 import { requestApproval, SessionApprovalState } from './loop/approval-gate.js';
 import { maybeAutoOrchestrate, maybeRunCompaction } from './loop/workflow-decisions.js';
 import { runHook } from '../hooks/runner.js';
+import { resolveMentionsInPrompt, buildMentionContextBlock } from '../repo-intel/mention-resolver.js';
 
 export type { AgentEvents, OrchestrationProgress };
 
@@ -121,6 +122,15 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         }
         if (submitHook.additionalContext) {
           userMessage = `${submitHook.additionalContext}\n\n${userMessage}`;
+        }
+
+        const mentions = await resolveMentionsInPrompt(userMessage);
+        if (mentions.resolved.length > 0) {
+          const block = buildMentionContextBlock(mentions.resolved);
+          userMessage = `${block}\n\n${userMessage}`;
+        }
+        for (const err of mentions.errors) {
+          this.emit('error', err);
         }
       }
 

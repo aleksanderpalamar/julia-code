@@ -12,6 +12,7 @@ import { selectMessagesForRetention } from '../context/message-scorer.js';
 import { deserializeCompaction, formatCompactionForContext } from '../context/compaction.js';
 import { assessHealth, getContextWarningMessage } from '../context/health.js';
 import { prepareMemoryContext } from '../memory/pipeline.js';
+import { prepareRepoCodeContext } from '../repo-intel/pipeline.js';
 
 interface BuildContextOptions {
   planMode?: boolean;
@@ -63,9 +64,15 @@ export async function buildContext(
   }
 
   const userInput = getLatestUserMessage(sessionId);
-  const memoriesSection = await prepareMemoryContext(sessionId, userInput, budget.memories);
+  const [memoriesSection, repoCodeSection] = await Promise.all([
+    prepareMemoryContext(sessionId, userInput, budget.memories),
+    prepareRepoCodeContext(userInput, budget.repoCode),
+  ]);
   if (memoriesSection) {
     messages.push({ role: 'system', content: memoriesSection });
+  }
+  if (repoCodeSection) {
+    messages.push({ role: 'system', content: repoCodeSection });
   }
 
   messages.push({

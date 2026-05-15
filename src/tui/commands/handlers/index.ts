@@ -10,6 +10,7 @@ import { temperament } from "./temperament.js";
 import { mode } from "./mode.js";
 import { image } from "./image.js";
 import { skill } from "./skill.js";
+import { indexCmd } from "./indexCmd.js";
 
 export const slashCommands: SlashCommand[] = [
   quit,
@@ -22,6 +23,7 @@ export const slashCommands: SlashCommand[] = [
   temperament,
   mode,
   image,
+  indexCmd,
   skill,
 ];
 

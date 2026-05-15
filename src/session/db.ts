@@ -69,6 +69,31 @@ export function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
     CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
 
+    CREATE TABLE IF NOT EXISTS code_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_path TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      file_hash TEXT NOT NULL,
+      language TEXT,
+      embedding BLOB,
+      embedding_model TEXT,
+      token_estimate INTEGER NOT NULL DEFAULT 0,
+      indexed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(file_path, start_line, end_line)
+    );
+    CREATE INDEX IF NOT EXISTS idx_code_chunks_file ON code_chunks(file_path);
+    CREATE INDEX IF NOT EXISTS idx_code_chunks_file_hash ON code_chunks(file_hash);
+    CREATE INDEX IF NOT EXISTS idx_code_chunks_pending ON code_chunks(embedding) WHERE embedding IS NULL;
+
+    CREATE TABLE IF NOT EXISTS code_index_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS orchestration_runs (
       id TEXT PRIMARY KEY,
       parent_session_id TEXT NOT NULL,
