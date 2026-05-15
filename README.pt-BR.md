@@ -269,6 +269,24 @@ Com `memory.semantic.enabled: true`, a Julia usa embeddings (via Ollama `nomic-e
 
 Se o provider de embedding ficar indisponível a qualquer momento (Ollama offline, modelo faltando, erro de rede), a Julia degrada transparentemente para a injeção legada de memórias recentes — a aplicação nunca quebra por falta de embedding.
 
+### Inteligência de repositório (local)
+
+A Julia pode construir um índice semântico local do seu projeto para que código relevante seja injetado automaticamente no contexto da LLM — equivalente offline da feature "repo-aware" do Cursor, alimentado pelo mesmo `nomic-embed-text` do Ollama usado nas memórias. Nada sai da máquina. Duas peças:
+
+**Retrieval semântico automático.** A cada turn, o prompt do usuário é embedado e ranqueado contra os chunks indexados por similaridade cosseno; os top 5 (token-budgeted, com chunks do mesmo arquivo mesclados) são injetados como bloco de sistema junto das memórias. Filtrado por gating heurístico que pula saudações, meta-perguntas e prompts curtos sem tokens "code-like".
+
+**Menções `@filename`.** Referencie qualquer arquivo digitando `@<caminho>` na mensagem — o conteúdo é expandido inline antes do prompt ser enviado. Use Tab no dropdown fuzzy que aparece ao digitar `@`. Se o caminho não existir, fuzzy-match contra o índice salva typos (ex.: `@app.tsx` → `src/tui/app.tsx`). Menções dentro de blocos de código (fenced ou inline) são ignoradas, paths absolutos e `../` são rejeitados, arquivos >50 KB são truncados, e binários recusados.
+
+**Fluxo de indexação:**
+
+1. Baixe o modelo de embedding: `ollama pull nomic-embed-text`.
+2. No primeiro start, o auto-indexer constrói o índice em background a partir de `git ls-files` (respeita `.gitignore`, ignora binários e arquivos >1 MB, com cap de 5 000 arquivos).
+3. Use `/index` para re-indexar incremental, `/index force` para rebuild completo, `/index status` para inspecionar metadados, `/index abort` para cancelar uma execução em andamento.
+
+**Armazenamento.** Chunks (80 linhas com 20 de overlap) vivem na tabela `code_chunks` com hashes de conteúdo/arquivo para re-index incremental rápido — arquivos não modificados pulam o chunking, e chunks cujo conteúdo não mudou preservam seus embeddings existentes.
+
+**Degradação.** Se o Ollama estiver fora na hora de indexar, chunks são inseridos sem embeddings e o próximo `/index` retoma daí. Se estiver fora no momento da query, o bloco de retrieval é omitido silenciosamente — menções `@filename` continuam funcionando porque são puro I/O de arquivo. Quando o índice fica defasado em relação ao `HEAD` atual, uma dica única é emitida sugerindo um `/index` refresh.
+
 ## Arquitetura
 
 ```
@@ -303,7 +321,7 @@ src/
 
 ### Banco de dados
 
-SQLite com WAL mode. 7 tabelas:
+SQLite com WAL mode. 9 tabelas:
 
 - **sessions** — conversas com titulo, modelo, tokens
 - **messages** — mensagens user/assistant/tool com tool_calls
@@ -311,6 +329,8 @@ SQLite com WAL mode. 7 tabelas:
 - **memories** — memorias persistentes com categorias
 - **orchestration_runs** — batches de subagentes com status/duracao
 - **subagent_runs** — tasks individuais com lifecycle completo
+- **code_chunks** — chunks de código indexados com embeddings + hashes de conteúdo
+- **code_index_meta** — store key/value singleton com metadados do índice (HEAD sha, última execução, modelo)
 
 ## Stack
 
