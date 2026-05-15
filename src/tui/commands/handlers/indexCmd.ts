@@ -5,6 +5,7 @@ import {
   getIndexStatus,
   abortRunningIndex,
 } from "../../../repo-intel/index-runner.js";
+import { invalidateFilePathsCache } from "../../../repo-intel/file-paths.js";
 import type { IndexProgress } from "../../../repo-intel/types.js";
 
 const PROGRESS_INTERVAL_MS = 2_000;
@@ -72,6 +73,7 @@ export const indexCmd: SlashCommand = {
 
     try {
       const result = await runIndexCommand({ force, onProgress });
+      invalidateFilePathsCache();
       if (result.reason === 'not-a-repo') {
         ctx.addSystemEntry("Not a git repository — code index skipped. Run `git init` and try again.");
         return true;

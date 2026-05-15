@@ -3,11 +3,17 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import { SlashMenu } from "./SlashMenu.js";
+import { MentionMenu } from "./MentionMenu.js";
 import { filterCommands } from "../commands/registry.js";
+import { fuzzyRank } from "../../repo-intel/fuzzy.js";
+import { getFilePathsForMentions } from "../../repo-intel/file-paths.js";
 import type { AgentMode } from "../types.js";
 import { modeLabel, modeColor } from "../types.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { getBreakpoint } from "../responsive.js";
+
+const MENTION_TRIGGER_RE = /(?:^|\s)@([a-zA-Z0-9_./\-]*)$/;
+const MENTION_MENU_MAX = 8;
 
 interface Props {
   onSubmit: (value: string) => void;
@@ -49,33 +55,69 @@ export function Input({
     [value, showMenu],
   );
 
+  const mentionMatch = !showMenu ? value.match(MENTION_TRIGGER_RE) : null;
+  const mentionQuery = mentionMatch?.[1] ?? null;
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery == null) return [];
+    const paths = getFilePathsForMentions();
+    if (paths.length === 0) return [];
+    if (mentionQuery.length === 0) {
+      return paths.slice(0, MENTION_MENU_MAX);
+    }
+    return fuzzyRank(mentionQuery, paths, MENTION_MENU_MAX).map(m => m.value);
+  }, [mentionQuery]);
+
+  const showMentionMenu = mentionMatches.length > 0;
+
   useInput(
     (_input, key) => {
-      if (!showMenu || filteredCommands.length === 0) return;
-
-      if (key.upArrow) {
-        setSelectedIndex((prev) =>
-          prev <= 0 ? filteredCommands.length - 1 : prev - 1,
-        );
-      }
-
-      if (key.downArrow) {
-        setSelectedIndex((prev) =>
-          prev >= filteredCommands.length - 1 ? 0 : prev + 1,
-        );
-      }
-
-      if (key.tab && !key.shift) {
-        const cmd = filteredCommands[selectedIndex];
-        if (cmd) {
-          setValue(cmd.name + " ");
+      if (showMenu && filteredCommands.length > 0) {
+        if (key.upArrow) {
+          setSelectedIndex((prev) =>
+            prev <= 0 ? filteredCommands.length - 1 : prev - 1,
+          );
+        }
+        if (key.downArrow) {
+          setSelectedIndex((prev) =>
+            prev >= filteredCommands.length - 1 ? 0 : prev + 1,
+          );
+        }
+        if (key.tab && !key.shift) {
+          const cmd = filteredCommands[selectedIndex];
+          if (cmd) {
+            setValue(cmd.name + " ");
+            setSelectedIndex(0);
+          }
+        }
+        if (key.escape) {
+          setValue("");
           setSelectedIndex(0);
         }
+        return;
       }
 
-      if (key.escape) {
-        setValue("");
-        setSelectedIndex(0);
+      if (showMentionMenu) {
+        if (key.upArrow) {
+          setSelectedIndex((prev) =>
+            prev <= 0 ? mentionMatches.length - 1 : prev - 1,
+          );
+        }
+        if (key.downArrow) {
+          setSelectedIndex((prev) =>
+            prev >= mentionMatches.length - 1 ? 0 : prev + 1,
+          );
+        }
+        if (key.tab && !key.shift) {
+          const target = mentionMatches[selectedIndex];
+          if (target) {
+            const before = value.slice(0, value.length - (mentionQuery?.length ?? 0));
+            setValue(before + target + " ");
+            setSelectedIndex(0);
+          }
+        }
+        if (key.escape) {
+          setSelectedIndex(0);
+        }
       }
     },
     { isActive: !disabled },
@@ -132,6 +174,9 @@ export function Input({
     <Box flexDirection="column">
       {showMenu && filteredCommands.length > 0 && (
         <SlashMenu commands={filteredCommands} selectedIndex={selectedIndex} />
+      )}
+      {!showMenu && showMentionMenu && (
+        <MentionMenu matches={mentionMatches} selectedIndex={selectedIndex} />
       )}
       <Box>
         {displayModel && (
