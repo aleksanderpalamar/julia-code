@@ -66,6 +66,25 @@ export function deleteChunksForFile(filePath: string): number {
   return Number(result.changes ?? 0);
 }
 
+export function deleteObsoleteChunksForFile(filePath: string, keepRanges: Array<[number, number]>): number {
+  const db = getDb();
+  if (keepRanges.length === 0) {
+    const result = db.prepare('DELETE FROM code_chunks WHERE file_path = ?').run(filePath);
+    return Number(result.changes ?? 0);
+  }
+  const pairExpr = keepRanges.map(() => '(? , ?)').join(',');
+  const params: SQLInputValue[] = [filePath];
+  for (const [s, e] of keepRanges) {
+    params.push(s, e);
+  }
+  const result = db.prepare(
+    `DELETE FROM code_chunks
+     WHERE file_path = ?
+       AND (start_line, end_line) NOT IN (VALUES ${pairExpr})`,
+  ).run(...params);
+  return Number(result.changes ?? 0);
+}
+
 export function deleteChunksNotIn(filePaths: string[]): number {
   if (filePaths.length === 0) {
     const result = getDb().prepare('DELETE FROM code_chunks').run();

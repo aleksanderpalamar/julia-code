@@ -145,4 +145,49 @@ describe("runIndex", () => {
     expect(result.reason).toBe("not-a-repo");
     expect(countChunks()).toBe(0);
   });
+
+  it("preserves embeddings for unchanged chunks within a mutated file", async () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= 200; i++) lines.push(`line ${i};`);
+    fakeFiles.set("src/big.ts", lines.join("\n"));
+    await runIndex();
+
+    const beforeChunks = getChunksByFile("src/big.ts");
+    expect(beforeChunks.length).toBeGreaterThan(1);
+    const initialEmbeds = embedMock.mock.calls.length;
+    expect(initialEmbeds).toBe(beforeChunks.length);
+    const lastChunk = beforeChunks[beforeChunks.length - 1];
+    const originalLastEmbedding = Buffer.from(lastChunk.embedding!);
+
+    lines[0] = "line 1; // changed";
+    fakeFiles.set("src/big.ts", lines.join("\n"));
+    embedMock.mockClear();
+    await runIndex();
+
+    const afterEmbeds = embedMock.mock.calls.length;
+    expect(afterEmbeds).toBeGreaterThan(0);
+    expect(afterEmbeds).toBeLessThan(beforeChunks.length);
+
+    const afterChunks = getChunksByFile("src/big.ts");
+    const lastAfter = afterChunks[afterChunks.length - 1];
+    expect(Buffer.from(lastAfter.embedding!).equals(originalLastEmbedding)).toBe(true);
+    expect(lastAfter.content).not.toContain("// changed");
+
+    const firstAfter = afterChunks[0];
+    expect(firstAfter.content).toContain("// changed");
+    expect(Buffer.from(firstAfter.embedding!).equals(originalLastEmbedding)).toBe(false);
+  });
+
+  it("removes chunks whose ranges no longer exist when a file shrinks", async () => {
+    const longLines = Array.from({ length: 200 }, (_, i) => `line ${i + 1};`);
+    fakeFiles.set("src/big.ts", longLines.join("\n"));
+    await runIndex();
+    const longCount = getChunksByFile("src/big.ts").length;
+    expect(longCount).toBeGreaterThan(1);
+
+    fakeFiles.set("src/big.ts", longLines.slice(0, 30).join("\n"));
+    await runIndex();
+    const shortCount = getChunksByFile("src/big.ts").length;
+    expect(shortCount).toBe(1);
+  });
 });

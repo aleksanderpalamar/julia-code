@@ -7,7 +7,7 @@ import { chunkContent } from './chunker.js';
 import { listIndexableFiles, languageFromPath, readFileSafe } from './file-scanner.js';
 import {
   upsertChunk,
-  deleteChunksForFile,
+  deleteObsoleteChunksForFile,
   deleteChunksNotIn,
   getFileHash,
   setIndexMeta,
@@ -79,7 +79,6 @@ export async function runIndex(opts: RunIndexOptions = {}): Promise<IndexResult>
       if (existing === fileHash) continue;
     }
 
-    deleteChunksForFile(rel);
     const language = languageFromPath(rel);
     const chunks = chunkContent(content);
 
@@ -96,6 +95,8 @@ export async function runIndex(opts: RunIndexOptions = {}): Promise<IndexResult>
       });
       progress.chunksInserted++;
     }
+    const keepRanges = chunks.map<[number, number]>(c => [c.startLine, c.endLine]);
+    deleteObsoleteChunksForFile(rel, keepRanges);
     filesIndexed++;
   }
 
