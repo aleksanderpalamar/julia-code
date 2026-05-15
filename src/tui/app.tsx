@@ -139,6 +139,28 @@ export function App({ sessionId }: Props) {
     if (!isThinking) setShowBtw(false);
   }, [isThinking]);
 
+  useEffect(() => {
+    if (!trusted) return;
+    let cancelled = false;
+    (async () => {
+      const { ensureInitialIndex } = await import("../repo-intel/index-runner.js");
+      const { listIndexableFiles } = await import("../repo-intel/file-scanner.js");
+      if (cancelled) return;
+      const scan = listIndexableFiles();
+      if (!scan.isGitRepo) return;
+      const result = await ensureInitialIndex();
+      if (cancelled || !result) return;
+      if (result.reason === 'completed') {
+        addSystemEntry(`Code index built: ${result.filesIndexed} files, ${result.chunksEmbedded} chunks embedded.`);
+      } else if (result.reason === 'provider-unavailable') {
+        addSystemEntry(`Code index built without embeddings (${result.chunksTotal} chunks) — Ollama unavailable. Run /index when it's back up.`);
+      }
+    })().catch(err => {
+      addSystemEntry(`Initial index failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    return () => { cancelled = true; };
+  }, [trusted, addSystemEntry]);
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit();

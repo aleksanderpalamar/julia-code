@@ -6,6 +6,7 @@ const commands: SlashCommand[] = [
   { name: "/trust", description: "Manage trusted directories" },
   { name: "/mcp", description: "Manage MCP servers" },
   { name: "/image", description: "Attach image: /image <path> | list | clear" },
+  { name: "/index", description: "Build code index: /index | force | status | abort" },
   {
     name: "/mode",
     description: "Cycle mode: Normal → Plan → Accept Edits (Shift+Tab)",
