@@ -8,6 +8,7 @@ export interface ContextBudget {
   systemPrompt: number;
   taskAnchor: number;
   memories: number;
+  repoCode: number;
   compactedHistory: number;
   recentMessages: number;
 }
@@ -30,10 +31,11 @@ export async function computeBudget(model: string, systemPromptText?: string): P
   const { memoriesPct, compactedHistoryPct } = getModelSizeRatios(total);
 
   const memories = Math.min(Math.floor(available * memoriesPct), 1000);
+  const repoCode = Math.min(Math.floor(available * 0.10), 2000);
   const compactedHistory = Math.floor(available * compactedHistoryPct);
 
   const recentMessages = Math.max(
-    available - systemPrompt - taskAnchor - memories - compactedHistory,
+    available - systemPrompt - taskAnchor - memories - repoCode - compactedHistory,
     Math.floor(available * 0.2), // minimum 20% guaranteed
   );
 
@@ -44,6 +46,7 @@ export async function computeBudget(model: string, systemPromptText?: string): P
     systemPrompt,
     taskAnchor,
     memories,
+    repoCode,
     compactedHistory,
     recentMessages,
   };
