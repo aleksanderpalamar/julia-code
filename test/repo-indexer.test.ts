@@ -63,7 +63,7 @@ vi.mock("../src/memory/embeddings/index.js", () => ({
 
 import { initSchema } from "../src/session/db.js";
 import { runIndex } from "../src/repo-intel/indexer.js";
-import { countChunks, getChunksByFile } from "../src/repo-intel/storage.js";
+import { countChunks, getChunksByFile, deleteObsoleteChunksForFile } from "../src/repo-intel/storage.js";
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -216,5 +216,30 @@ describe("runIndex", () => {
     await runIndex();
     const shortCount = getChunksByFile("src/big.ts").length;
     expect(shortCount).toBe(1);
+  });
+});
+
+describe("deleteObsoleteChunksForFile", () => {
+  it("deletes obsolete chunks without exceeding the SQLite variable limit", () => {
+    // A single `NOT IN (VALUES ...)` binds 2 params per kept range; 17000
+    // ranges = 34001 params, over SQLITE_MAX_VARIABLE_NUMBER (32766). The
+    // id-batched implementation must handle this without throwing.
+    const total = 20000;
+    const keepCount = 17000;
+    const insert = testDb.prepare(
+      `INSERT INTO code_chunks
+         (file_path, start_line, end_line, content, content_hash, file_hash, language, token_estimate)
+       VALUES ('src/huge.ts', ?, ?, '', ?, 'fh', 'typescript', 0)`,
+    );
+    testDb.exec("BEGIN");
+    for (let i = 0; i < total; i++) insert.run(i + 1, i + 1, `ch${i}`);
+    testDb.exec("COMMIT");
+
+    const keep: Array<[number, number]> = [];
+    for (let i = 0; i < keepCount; i++) keep.push([i + 1, i + 1]);
+
+    const removed = deleteObsoleteChunksForFile("src/huge.ts", keep);
+    expect(removed).toBe(total - keepCount);
+    expect(getChunksByFile("src/huge.ts")).toHaveLength(keepCount);
   });
 });

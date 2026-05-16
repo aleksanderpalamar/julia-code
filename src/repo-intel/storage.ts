@@ -72,17 +72,31 @@ export function deleteObsoleteChunksForFile(filePath: string, keepRanges: Array<
     const result = db.prepare('DELETE FROM code_chunks WHERE file_path = ?').run(filePath);
     return Number(result.changes ?? 0);
   }
-  const pairExpr = keepRanges.map(() => '(? , ?)').join(',');
-  const params: SQLInputValue[] = [filePath];
-  for (const [s, e] of keepRanges) {
-    params.push(s, e);
+  // Resolve obsolete ids in JS, then delete by id in batches. A single
+  // `NOT IN (VALUES ...)` statement uses 2 bind params per range and trips
+  // SQLITE_MAX_VARIABLE_NUMBER on pathological files (~1M short lines).
+  // Batching `NOT IN` directly would be wrong — a range kept in one batch
+  // would be deleted by another's `NOT IN` — so we invert the comparison.
+  const keep = new Set(keepRanges.map(([s, e]) => `${s}:${e}`));
+  const rows = db.prepare(
+    'SELECT id, start_line, end_line FROM code_chunks WHERE file_path = ?',
+  ).all(filePath) as Array<{ id: number; start_line: number; end_line: number }>;
+  const obsolete = rows
+    .filter(r => !keep.has(`${r.start_line}:${r.end_line}`))
+    .map(r => r.id);
+  if (obsolete.length === 0) return 0;
+
+  let removed = 0;
+  const BATCH = 500;
+  for (let i = 0; i < obsolete.length; i += BATCH) {
+    const batch = obsolete.slice(i, i + BATCH);
+    const placeholders = batch.map(() => '?').join(',');
+    const result = db.prepare(
+      `DELETE FROM code_chunks WHERE id IN (${placeholders})`,
+    ).run(...(batch as SQLInputValue[]));
+    removed += Number(result.changes ?? 0);
   }
-  const result = db.prepare(
-    `DELETE FROM code_chunks
-     WHERE file_path = ?
-       AND (start_line, end_line) NOT IN (VALUES ${pairExpr})`,
-  ).run(...params);
-  return Number(result.changes ?? 0);
+  return removed;
 }
 
 export function deleteChunksNotIn(filePaths: string[]): number {
