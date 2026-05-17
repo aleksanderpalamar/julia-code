@@ -76,7 +76,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const config = getConfig();
     const requestedModel = model ?? config.defaultModel;
 
-    const plan = await resolveModelPlan(requestedModel, config.toolModel);
+    const plan = await resolveModelPlan(requestedModel, config.toolModel, config.toolPickModel);
     const { loopModel, auxModel } = plan;
 
     if (plan.hasToolModel && !plan.localHasTools) {

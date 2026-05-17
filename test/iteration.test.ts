@@ -61,6 +61,7 @@ vi.mock('../src/observability/logger.js', () => ({
 }));
 
 import { runOneIteration } from '../src/agent/iteration.js';
+import { addMessage } from '../src/session/manager.js';
 import { evaluateToolCall } from '../src/agent/security-gate.js';
 import { runToolCall } from '../src/agent/tool-executor.js';
 import { shouldEmergencyCompact } from '../src/context/health.js';
@@ -71,6 +72,7 @@ const cloudPlan: ModelPlan = {
   auxModel: 'claude-sonnet',
   hasToolModel: false,
   localHasTools: true,
+  toolPickModel: null,
 };
 
 const fallbackPlan: ModelPlan = {
@@ -78,6 +80,7 @@ const fallbackPlan: ModelPlan = {
   auxModel: 'llama3',
   hasToolModel: true,
   localHasTools: false,
+  toolPickModel: null,
 };
 
 function makeSink(): IterationEventSink & { events: Array<[string, unknown?]> } {
@@ -129,6 +132,7 @@ beforeEach(() => {
   }));
   vi.mocked(shouldEmergencyCompact).mockReset().mockReturnValue(false);
   vi.mocked(performEmergencyCompaction).mockReset();
+  vi.mocked(addMessage).mockReset();
 });
 
 describe('runOneIteration / aborted', () => {
@@ -182,6 +186,37 @@ describe('runOneIteration / done', () => {
 
     expect(outcome).toEqual({ kind: 'done', fullText: 'hello world' });
     expect(deps.sink.events.find(e => e[0] === 'usage')).toBeDefined();
+  });
+});
+
+describe('runOneIteration / tool-pick routing', () => {
+  const routingPlan: ModelPlan = {
+    loopModel: 'big',
+    auxModel: 'big',
+    hasToolModel: false,
+    localHasTools: true,
+    toolPickModel: 'small',
+  };
+
+  it('synthesises with the requested model when the gather model emits no tool calls', async () => {
+    chatScript = [
+      { type: 'text', text: 'draft answer' },
+      { type: 'done' },
+    ];
+    const deps = makeDeps({ plan: routingPlan });
+
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome).toEqual({ kind: 'done', fullText: 'draft answer' });
+    // The gather model's prose is suppressed; only the synthesis pass streams.
+    expect(deps.sink.events.filter(e => e[0] === 'chunk')).toEqual([
+      ['chunk', 'draft answer'],
+    ]);
+    // The answer is recorded once, against the requested (synthesis) model.
+    expect(vi.mocked(addMessage)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(addMessage).mock.calls[0]).toEqual(
+      ['s1', 'assistant', 'draft answer', undefined, undefined, undefined, 'big'],
+    );
   });
 });
 

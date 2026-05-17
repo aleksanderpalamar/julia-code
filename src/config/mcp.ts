@@ -63,6 +63,21 @@ export function clearToolModel(): void {
   });
 }
 
+export function setToolPickModel(modelId: string): void {
+  updateRawSettings(raw => {
+    const models = ensureModels(raw);
+    models.toolPickModel = modelId;
+  });
+}
+
+export function clearToolPickModel(): void {
+  updateRawSettings(raw => {
+    if (raw.models && typeof raw.models === 'object') {
+      raw.models.toolPickModel = null;
+    }
+  });
+}
+
 export function getAvailableModels(): Array<{ id: string; name?: string; isCloud?: boolean }> {
   try {
     const raw = readRawSettings();

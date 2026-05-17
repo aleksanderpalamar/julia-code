@@ -6,6 +6,7 @@ import { trust } from "./trust.js";
 import { mcp } from "./mcp.js";
 import { model } from "./model.js";
 import { toolModel } from "./toolModel.js";
+import { toolPickModel } from "./toolPickModel.js";
 import { temperament } from "./temperament.js";
 import { mode } from "./mode.js";
 import { image } from "./image.js";
@@ -19,6 +20,7 @@ export const slashCommands: SlashCommand[] = [
   trust,
   mcp,
   toolModel,
+  toolPickModel,
   model,
   temperament,
   mode,

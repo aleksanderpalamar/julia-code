@@ -74,6 +74,10 @@ export async function runOneIteration(
     toolSchemas,
   );
 
+  // With routing on, this is a gather iteration on the small tool-pick model:
+  // its prose is internal, so it is not streamed to the user.
+  const routingActive = Boolean(plan.toolPickModel);
+
   const { messages, budget, health } = await prepareIterationContext({
     sessionId,
     currentModel,
@@ -90,6 +94,7 @@ export async function runOneIteration(
     tools: currentTools,
     canRetryOnError: lastHadToolCalls && retryCount < 1,
     emit,
+    suppressText: routingActive,
   });
 
   if (streamed.kind === 'error') {
@@ -118,6 +123,13 @@ export async function runOneIteration(
     retryCount++;
     log.retry({ sessionId, iteration, kind: 'empty' });
     return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
+  }
+
+  // Routing: the small gather model emitted no tool calls — it has gathered
+  // enough. Discard its draft and synthesise the answer with the requested
+  // model in a dedicated pass.
+  if (routingActive && toolCalls.length === 0) {
+    return runSynthesisPass(deps, iteration);
   }
 
   addMessage(
@@ -155,4 +167,43 @@ export async function runOneIteration(
 
   lastHadToolCalls = true;
   return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
+}
+
+/**
+ * Final pass for a routed turn: the requested model synthesises the answer
+ * from the full context the small tool-pick model gathered. No tools are
+ * offered — gathering is complete — and the output is streamed to the user.
+ */
+async function runSynthesisPass(deps: IterationDeps, iteration: number): Promise<IterationOutcome> {
+  const { sessionId, plan, planMode, temperament, maxIterations, extraSystemContent, emit } = deps;
+
+  emit.thinking();
+
+  const { messages } = await prepareIterationContext({
+    sessionId,
+    currentModel: plan.auxModel,
+    auxModel: plan.auxModel,
+    options: { planMode, temperament, iteration, maxIterations, extraSystemContent },
+    emit,
+  });
+
+  const streamed = await streamLLMChat({
+    sessionId,
+    iteration,
+    model: plan.auxModel,
+    messages,
+    tools: undefined,
+    canRetryOnError: false,
+    emit,
+  });
+
+  if (streamed.kind !== 'ok') {
+    return {
+      kind: 'error',
+      message: streamed.kind === 'error' ? streamed.message : 'synthesis pass failed',
+    };
+  }
+
+  addMessage(sessionId, 'assistant', streamed.fullText, undefined, undefined, undefined, plan.auxModel);
+  return { kind: 'done', fullText: streamed.fullText };
 }

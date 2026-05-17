@@ -23,8 +23,11 @@ export async function streamLLMChat(input: {
   tools: ToolSchema[] | undefined;
   canRetryOnError: boolean;
   emit: LLMStreamEmitter;
+  /** When true, text is accumulated but not streamed to the user — used for
+   *  gather iterations on the tool-pick model, whose prose is internal. */
+  suppressText?: boolean;
 }): Promise<LLMStreamOutcome> {
-  const { sessionId, iteration, model, messages, tools, canRetryOnError, emit } = input;
+  const { sessionId, iteration, model, messages, tools, canRetryOnError, emit, suppressText } = input;
 
   const provider = getProvider('ollama');
   const stream = provider.chat({ model, messages, tools });
@@ -36,7 +39,7 @@ export async function streamLLMChat(input: {
     switch (chunk.type) {
       case 'text':
         fullText += chunk.text!;
-        emit.chunk(chunk.text!);
+        if (!suppressText) emit.chunk(chunk.text!);
         break;
       case 'tool_call':
         toolCalls.push(chunk.toolCall!);

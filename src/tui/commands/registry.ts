@@ -18,6 +18,11 @@ const commands: SlashCommand[] = [
     autoTrigger: true,
   },
   {
+    name: "/toolpickmodel",
+    description: "Route tool-picking to a small model: /toolpickmodel [name|auto]",
+    autoTrigger: true,
+  },
+  {
     name: "/temperament",
     description: "Set temperament: neutral | sharp | warm | auto",
   },

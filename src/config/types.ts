@@ -42,6 +42,7 @@ export const ConfigSchema = z.object({
   acpWorktreeIsolation: z.boolean().default(true),
   acpModelLimits: z.record(z.number()).default({}),
   toolModel: z.string().nullable().default(null),
+  toolPickModel: z.string().nullable().default(null),   // small model that picks tools; requested model synthesizes (null = no routing)
   toolCorrectionAttempts: z.number().default(2),   // re-prompt rounds when a tool call fails schema validation (0 = off)
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   contextReservePercent: z.number().default(0.15),
@@ -77,6 +78,7 @@ export const SettingsSchema = z.object({
     baseUrl: z.string().default('http://localhost:11434'),
     default: z.string().default('qwen3:8b'),
     toolModel: z.string().nullable().default(null),
+    toolPickModel: z.string().nullable().default(null),
     available: z.array(SettingsModelSchema).default([]),
   }).optional(),
   agent: z.object({
