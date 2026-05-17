@@ -175,6 +175,70 @@ describe('validateAndCoerceArgs — unknown properties', () => {
   });
 });
 
+describe('validateAndCoerceArgs — additionalProperties / patternProperties', () => {
+  const openSchema: ToolParameterSchema = {
+    type: 'object',
+    properties: { name: { type: 'string' } },
+    required: ['name'],
+    additionalProperties: true,
+  };
+
+  const typedExtraSchema: ToolParameterSchema = {
+    type: 'object',
+    properties: { name: { type: 'string' } },
+    required: ['name'],
+    additionalProperties: { type: 'number' },
+  };
+
+  const patternSchema: ToolParameterSchema = {
+    type: 'object',
+    properties: { name: { type: 'string' } },
+    required: ['name'],
+    patternProperties: { '^x-': { type: 'string' } },
+  };
+
+  it('keeps dynamic keys untouched when additionalProperties is true', () => {
+    const result = validateAndCoerceArgs(openSchema, {
+      name: 'a', extra: '5', nested: { k: 1 },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({ name: 'a', extra: '5', nested: { k: 1 } });
+    }
+  });
+
+  it('coerces dynamic keys against the additionalProperties schema', () => {
+    const result = validateAndCoerceArgs(typedExtraSchema, { name: 'a', count: '7' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.count).toBe(7);
+  });
+
+  it('rejects a dynamic key that violates the additionalProperties schema', () => {
+    const result = validateAndCoerceArgs(typedExtraSchema, { name: 'a', count: 'abc' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0].param).toBe('count');
+  });
+
+  it('validates keys matching patternProperties and drops the rest', () => {
+    const result = validateAndCoerceArgs(patternSchema, {
+      name: 'a', 'x-trace': 'id-1', other: 'gone',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual({ name: 'a', 'x-trace': 'id-1' });
+  });
+
+  it('still drops unknown keys on a closed schema', () => {
+    const closed: ToolParameterSchema = {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    };
+    const result = validateAndCoerceArgs(closed, { name: 'a', bogus: 1 });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual({ name: 'a' });
+  });
+});
+
 describe('formatArgErrors', () => {
   it('renders a readable multi-line block', () => {
     const result = validateAndCoerceArgs(editSchema, { path: 'x.ts' });

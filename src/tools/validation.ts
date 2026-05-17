@@ -22,6 +22,11 @@ export interface ToolParameterSchema {
   type?: string;
   properties?: Record<string, PropertySchema>;
   required?: readonly string[];
+  /** When `true` (or a schema), keys outside `properties` are valid — MCP
+   *  tools often declare this for free-form arguments. */
+  additionalProperties?: boolean | PropertySchema;
+  /** Keys matching a regex pattern are valid and validated against its schema. */
+  patternProperties?: Record<string, PropertySchema>;
 }
 
 export interface ArgError {
@@ -52,12 +57,22 @@ export function validateAndCoerceArgs(
   const errors: ArgError[] = [];
   const value: Record<string, unknown> = {};
 
-  // Coerce + type-check every supplied argument the schema knows about.
-  // Unknown properties are dropped silently: a stray field the tool ignores
-  // is harmless, and rejecting it would trigger needless correction rounds.
+  // Coerce + type-check every supplied argument the schema knows about. A key
+  // outside `properties` is resolved via additionalProperties/patternProperties
+  // so MCP tools with free-form schemas keep their dynamic args; on a closed
+  // schema the key is dropped silently (a hallucinated field is harmless, and
+  // rejecting it would trigger needless correction rounds).
   for (const [key, raw] of Object.entries(args)) {
-    const prop = properties[key];
-    if (!prop || raw == null) continue;
+    if (raw == null) continue;
+
+    const prop = key in properties
+      ? properties[key]
+      : dynamicSchemaFor(key, schema);
+    if (prop == null) continue;         // unknown key, closed schema — drop
+    if (prop === 'open') {              // additionalProperties: true — keep as-is
+      value[key] = raw;
+      continue;
+    }
 
     const coerced = coerceValue(raw, prop);
     const violation = checkValue(coerced, prop);
@@ -83,6 +98,37 @@ export function validateAndCoerceArgs(
 export function formatArgErrors(toolName: string, errors: ArgError[]): string {
   const lines = errors.map(e => `  - ${e.message}`).join('\n');
   return `Invalid arguments for tool "${toolName}":\n${lines}`;
+}
+
+/**
+ * Resolves the schema for a key not listed in `properties`. MCP tools may
+ * declare `additionalProperties` / `patternProperties`, in which case dynamic
+ * keys are valid and must reach the tool. Returns:
+ *   - a PropertySchema → validate/coerce the value against it
+ *   - 'open'           → keep the value untouched (`additionalProperties: true`)
+ *   - null             → drop the key (closed schema, or additionalProperties false)
+ */
+function dynamicSchemaFor(
+  key: string,
+  schema: ToolParameterSchema | null | undefined,
+): PropertySchema | 'open' | null {
+  if (schema?.patternProperties) {
+    for (const [pattern, sub] of Object.entries(schema.patternProperties)) {
+      if (matchesPattern(pattern, key)) return sub;
+    }
+  }
+  const extra = schema?.additionalProperties;
+  if (extra === true) return 'open';
+  if (extra && typeof extra === 'object') return extra;
+  return null; // false or absent — closed schema
+}
+
+function matchesPattern(pattern: string, key: string): boolean {
+  try {
+    return new RegExp(pattern).test(key);
+  } catch {
+    return false; // malformed pattern in a tool schema — ignore it
+  }
 }
 
 // --- coercion -------------------------------------------------------------
