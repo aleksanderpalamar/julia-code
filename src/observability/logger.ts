@@ -46,7 +46,7 @@ export type ObservabilityEvent =
       ts: string;
       sessionId: string;
       iteration: number;
-      kind: 'stream' | 'empty' | 'deterministic';
+      kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction';
     }
   | {
       type: 'loop_end';
@@ -140,7 +140,7 @@ export const log = {
   retry(args: {
     sessionId: string;
     iteration: number;
-    kind: 'stream' | 'empty' | 'deterministic';
+    kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction';
   }): void {
     fire({ type: 'retry', ts: now(), ...args });
   },

@@ -76,6 +76,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'claude-sonnet',
     hasToolModel: false,
     localHasTools: true,
+    toolPickModel: null,
   };
 
   const localToolCapablePlan: ModelPlan = {
@@ -83,6 +84,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'qwen2.5-coder',
     hasToolModel: false,
     localHasTools: true,
+    toolPickModel: null,
   };
 
   const fallbackPlan: ModelPlan = {
@@ -90,6 +92,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'llama3',
     hasToolModel: true,
     localHasTools: false,
+    toolPickModel: null,
   };
 
   const toolCapableAuxWithToolModelPlan: ModelPlan = {
@@ -97,6 +100,15 @@ describe('chooseIterationModel', () => {
     auxModel: 'another-tool-model',
     hasToolModel: true,
     localHasTools: true,
+    toolPickModel: null,
+  };
+
+  const routingPlan: ModelPlan = {
+    loopModel: 'qwen-big',
+    auxModel: 'qwen-big',
+    hasToolModel: false,
+    localHasTools: true,
+    toolPickModel: 'qwen-small',
   };
 
   it('cloud plan always uses loopModel with tools', () => {
@@ -130,5 +142,50 @@ describe('chooseIterationModel', () => {
   it('tool-capable aux + hasToolModel prefers auxModel with tools (no useLocalFirst)', () => {
     const choice = chooseIterationModel(toolCapableAuxWithToolModelPlan, 1, false, toolSchemas);
     expect(choice).toEqual({ model: 'another-tool-model', tools: toolSchemas, useLocalFirst: false });
+  });
+
+  it('routing plan uses toolPickModel with tools on every gather iteration', () => {
+    expect(chooseIterationModel(routingPlan, 1, false, toolSchemas))
+      .toEqual({ model: 'qwen-small', tools: toolSchemas, useLocalFirst: false });
+    expect(chooseIterationModel(routingPlan, 4, false, toolSchemas))
+      .toEqual({ model: 'qwen-small', tools: toolSchemas, useLocalFirst: false });
+  });
+});
+
+describe('resolveModelPlan — tool-pick routing', () => {
+  it('enables routing when toolPickModel is set and supports tools', async () => {
+    vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
+    vi.mocked(supportsTools).mockResolvedValue(true);
+
+    const plan = await resolveModelPlan('qwen-big', null, 'qwen-small');
+
+    expect(plan.toolPickModel).toBe('qwen-small');
+  });
+
+  it('disables routing when toolPickModel cannot call tools', async () => {
+    vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
+    vi.mocked(supportsTools).mockImplementation(async (m: string) => m !== 'weak-pick');
+
+    const plan = await resolveModelPlan('qwen-big', null, 'weak-pick');
+
+    expect(plan.toolPickModel).toBeNull();
+  });
+
+  it('disables routing when toolPickModel equals the requested model', async () => {
+    vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
+    vi.mocked(supportsTools).mockResolvedValue(true);
+
+    const plan = await resolveModelPlan('qwen-big', null, 'qwen-big');
+
+    expect(plan.toolPickModel).toBeNull();
+  });
+
+  it('leaves routing off when toolPickModel is not configured', async () => {
+    vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
+    vi.mocked(supportsTools).mockResolvedValue(true);
+
+    const plan = await resolveModelPlan('qwen-big', null);
+
+    expect(plan.toolPickModel).toBeNull();
   });
 });

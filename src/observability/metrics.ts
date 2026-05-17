@@ -30,7 +30,7 @@ interface LoopMetrics {
   avgIterations: number | null;
   maxIterations: number | null;
   reasons: Record<'done' | 'max_iterations' | 'error' | 'aborted', number>;
-  retriesByKind: Record<'stream' | 'empty' | 'deterministic', number>;
+  retriesByKind: Record<'stream' | 'empty' | 'deterministic' | 'tool-correction', number>;
   iterationHistogram: Record<string, number>;
 }
 
@@ -158,7 +158,9 @@ export async function computeLoopMetrics(path?: string): Promise<LoopMetrics> {
     reasons[r]++;
   }
 
-  const retriesByKind: LoopMetrics['retriesByKind'] = { stream: 0, empty: 0, deterministic: 0 };
+  const retriesByKind: LoopMetrics['retriesByKind'] = {
+    stream: 0, empty: 0, deterministic: 0, 'tool-correction': 0,
+  };
   for (const e of retries) {
     const k = (e as Extract<ObservabilityEvent, { type: 'retry' }>).kind;
     retriesByKind[k]++;
@@ -284,7 +286,7 @@ export function formatMetricsForDisplay(m: AllMetrics): string {
   lines.push(`  avg iterations    ${m.loops.avgIterations ?? 'n/a'}`);
   lines.push(`  max iterations    ${m.loops.maxIterations ?? 'n/a'}`);
   lines.push(`  reasons           done=${m.loops.reasons.done} max=${m.loops.reasons.max_iterations} err=${m.loops.reasons.error} abort=${m.loops.reasons.aborted}`);
-  lines.push(`  retries           stream=${m.loops.retriesByKind.stream} empty=${m.loops.retriesByKind.empty} det=${m.loops.retriesByKind.deterministic}`);
+  lines.push(`  retries           stream=${m.loops.retriesByKind.stream} empty=${m.loops.retriesByKind.empty} det=${m.loops.retriesByKind.deterministic} correction=${m.loops.retriesByKind['tool-correction']}`);
 
   const topTools = Object.entries(m.tools.perTool)
     .sort(([, a], [, b]) => b.calls - a.calls)

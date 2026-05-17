@@ -86,6 +86,8 @@ export function loadConfig(): Config {
     acpWorktreeIsolation: settings?.acp?.worktreeIsolation,
     acpModelLimits: settings?.acp?.modelLimits,
     toolModel: settings?.models?.toolModel,
+    toolPickModel: settings?.models?.toolPickModel,
+    toolCorrectionAttempts: settings?.agent?.toolCorrectionAttempts,
     defaultTemperament: settings?.temperament?.default,
     contextReservePercent: settings?.context?.reservePercent,
     contextEmergencyThreshold: settings?.context?.emergencyThreshold,
