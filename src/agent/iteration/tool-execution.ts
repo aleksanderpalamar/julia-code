@@ -62,8 +62,11 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     // coerced, well-typed object. A malformed call goes through the correction
     // loop; if that fails, the schema errors are reported back to the model.
     const toolArgs = await resolveToolArgs({
-      sessionId, iteration, toolCall: tc, messages, correctionModel, breaker, emit,
+      sessionId, iteration, toolCall: tc, messages, correctionModel, breaker, emit, signal,
     });
+    // The correction loop above can await a full LLM request — re-check the
+    // signal so a cancellation during it is honoured before the tool runs.
+    if (signal?.aborted) return { aborted: true };
     if (toolArgs === null) {
       continue; // resolveToolArgs already recorded the failure as a tool result
     }
@@ -164,6 +167,7 @@ interface ResolveArgsInput {
   correctionModel: string;
   breaker: CorrectionBreaker;
   emit: ToolExecutionEmitter;
+  signal: AbortSignal | undefined;
 }
 
 /**
@@ -172,7 +176,7 @@ interface ResolveArgsInput {
  * (in which case the schema errors are already recorded as a tool result).
  */
 async function resolveToolArgs(input: ResolveArgsInput): Promise<Record<string, unknown> | null> {
-  const { sessionId, iteration, toolCall, messages, correctionModel, breaker, emit } = input;
+  const { sessionId, iteration, toolCall, messages, correctionModel, breaker, emit, signal } = input;
   const toolName = toolCall.function.name;
 
   const validation = validateAndCoerceArgs(getToolParameters(toolName), toolCall.function.arguments);
@@ -183,7 +187,7 @@ async function resolveToolArgs(input: ResolveArgsInput): Promise<Record<string, 
 
   const corrected = await correctOrNull({
     sessionId, iteration, toolCall, errors: validation.errors,
-    correctionModel, messages, breaker, emit,
+    correctionModel, messages, breaker, emit, signal,
   });
   if (corrected) return corrected;
 
@@ -202,11 +206,12 @@ interface CorrectOrNullInput {
   messages: ChatMessage[];
   breaker: CorrectionBreaker;
   emit: ToolExecutionEmitter;
+  signal: AbortSignal | undefined;
 }
 
 /** Runs the focused correction loop, honouring config and the circuit breaker. */
 async function correctOrNull(input: CorrectOrNullInput): Promise<Record<string, unknown> | null> {
-  const { sessionId, iteration, toolCall, errors, correctionModel, messages, breaker, emit } = input;
+  const { sessionId, iteration, toolCall, errors, correctionModel, messages, breaker, emit, signal } = input;
   const toolName = toolCall.function.name;
 
   const maxAttempts = getConfig().toolCorrectionAttempts;
@@ -220,7 +225,7 @@ async function correctOrNull(input: CorrectOrNullInput): Promise<Record<string, 
   const chat: ChatStreamFn = params => getProvider('ollama').chat(params);
   const outcome = await attemptCorrection({
     toolCall, errors, toolSchema, messages,
-    model: correctionModel, maxAttempts, chat,
+    model: correctionModel, maxAttempts, chat, signal,
   });
 
   if (outcome.kind === 'corrected') {
