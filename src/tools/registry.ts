@@ -46,6 +46,12 @@ export function getToolParameters(name: string): ToolParameterSchema | null {
   return tool ? (tool.parameters as ToolParameterSchema) : null;
 }
 
+/** Returns the provider-facing schema for a single tool, or null if unknown. */
+export function getToolSchema(name: string): ToolSchema | null {
+  const tool = tools.get(name);
+  return tool ? toolToSchema(tool) : null;
+}
+
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
   const tool = tools.get(name);
   if (!tool) {

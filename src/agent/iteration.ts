@@ -140,6 +140,8 @@ export async function runOneIteration(
     sessionId,
     iteration,
     toolCalls,
+    messages,
+    correctionModel: currentModel,
     budget,
     health,
     allowRules,

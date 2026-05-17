@@ -42,6 +42,7 @@ export const ConfigSchema = z.object({
   acpWorktreeIsolation: z.boolean().default(true),
   acpModelLimits: z.record(z.number()).default({}),
   toolModel: z.string().nullable().default(null),
+  toolCorrectionAttempts: z.number().default(2),   // re-prompt rounds when a tool call fails schema validation (0 = off)
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   contextReservePercent: z.number().default(0.15),
   contextEmergencyThreshold: z.number().default(0.90),
@@ -80,6 +81,7 @@ export const SettingsSchema = z.object({
   }).optional(),
   agent: z.object({
     maxToolIterations: z.number().default(25),
+    toolCorrectionAttempts: z.number().default(2),
   }).optional(),
   session: z.object({
     compactionThreshold: z.number().default(6000),
