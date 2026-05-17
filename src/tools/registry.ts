@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ToolDefinition, ToolResult, ToolContext } from './types.js';
 import type { ToolSchema } from '../providers/types.js';
+import type { ToolParameterSchema } from './validation.js';
 import { toolToSchema } from './types.js';
 import { getProjectDir } from '../config/workspace.js';
 
@@ -32,6 +33,17 @@ export function registerTool(tool: ToolDefinition): void {
 
 export function getToolSchemas(): ToolSchema[] {
   return Array.from(tools.values()).map(toolToSchema);
+}
+
+/**
+ * Returns the JSON Schema describing a tool's parameters, or null if the tool
+ * is unknown. Used to validate tool-call arguments before execution. The cast
+ * is a single typed boundary: every registered tool's `parameters` is authored
+ * as the JSON Schema subset that {@link ToolParameterSchema} models.
+ */
+export function getToolParameters(name: string): ToolParameterSchema | null {
+  const tool = tools.get(name);
+  return tool ? (tool.parameters as ToolParameterSchema) : null;
 }
 
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {

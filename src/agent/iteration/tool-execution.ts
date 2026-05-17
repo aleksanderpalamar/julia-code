@@ -8,6 +8,8 @@ import { log } from '../../observability/logger.js';
 import { evaluateToolCall } from '../security-gate.js';
 import { runToolCall } from '../tool-executor.js';
 import { runHook } from '../../hooks/runner.js';
+import { getToolParameters } from '../../tools/registry.js';
+import { validateAndCoerceArgs, formatArgErrors } from '../../tools/validation.js';
 
 interface ToolExecutionEmitter {
   toolResult(name: string, text: string, success: boolean): void;
@@ -35,7 +37,19 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
   for (const tc of toolCalls) {
     if (signal?.aborted) return { aborted: true };
     const toolName = tc.function.name;
-    const toolArgs = tc.function.arguments;
+
+    // Strict schema validation before anything else runs: the hook, the
+    // security gate and the tool all read the arguments, so they must see a
+    // coerced, well-typed object. A malformed call is reported back to the
+    // model instead of crashing inside the tool.
+    const validation = validateAndCoerceArgs(getToolParameters(toolName), tc.function.arguments);
+    if (!validation.ok) {
+      const reason = formatArgErrors(toolName, validation.errors);
+      addMessage(sessionId, 'tool', reason, undefined, tc.id);
+      emit.toolResult(toolName, reason, false);
+      continue;
+    }
+    const toolArgs = validation.value;
 
     const preHook = await runHook(
       'PreToolUse',
