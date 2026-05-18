@@ -74,9 +74,9 @@ export async function runOneIteration(
     toolSchemas,
   );
 
-  // With routing on, this is a gather iteration on the small tool-pick model:
+  // With routing on, this is a gather iteration on the small routing model:
   // its prose is internal, so it is not streamed to the user.
-  const routingActive = Boolean(plan.toolPickModel);
+  const routingActive = Boolean(plan.routeTools);
 
   const { messages, budget, health } = await prepareIterationContext({
     sessionId,
@@ -171,7 +171,7 @@ export async function runOneIteration(
 
 /**
  * Final pass for a routed turn: the requested model synthesises the answer
- * from the full context the small tool-pick model gathered. No tools are
+ * from the full context the small routing model gathered. No tools are
  * offered — gathering is complete — and the output is streamed to the user.
  */
 async function runSynthesisPass(deps: IterationDeps, iteration: number): Promise<IterationOutcome> {

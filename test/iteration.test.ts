@@ -72,7 +72,7 @@ const cloudPlan: ModelPlan = {
   auxModel: 'claude-sonnet',
   hasToolModel: false,
   localHasTools: true,
-  toolPickModel: null,
+  routeTools: null,
 };
 
 const fallbackPlan: ModelPlan = {
@@ -80,7 +80,7 @@ const fallbackPlan: ModelPlan = {
   auxModel: 'llama3',
   hasToolModel: true,
   localHasTools: false,
-  toolPickModel: null,
+  routeTools: null,
 };
 
 function makeSink(): IterationEventSink & { events: Array<[string, unknown?]> } {
@@ -195,7 +195,7 @@ describe('runOneIteration / tool-pick routing', () => {
     auxModel: 'big',
     hasToolModel: false,
     localHasTools: true,
-    toolPickModel: 'small',
+    routeTools: 'small',
   };
 
   it('synthesises with the requested model when the gather model emits no tool calls', async () => {

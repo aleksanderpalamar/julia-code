@@ -63,17 +63,17 @@ export function clearToolModel(): void {
   });
 }
 
-export function setToolPickModel(modelId: string): void {
+export function setRouteTools(modelId: string): void {
   updateRawSettings(raw => {
     const models = ensureModels(raw);
-    models.toolPickModel = modelId;
+    models.routeTools = modelId;
   });
 }
 
-export function clearToolPickModel(): void {
+export function clearRouteTools(): void {
   updateRawSettings(raw => {
     if (raw.models && typeof raw.models === 'object') {
-      raw.models.toolPickModel = null;
+      raw.models.routeTools = null;
     }
   });
 }
