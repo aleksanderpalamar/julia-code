@@ -76,7 +76,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'claude-sonnet',
     hasToolModel: false,
     localHasTools: true,
-    toolPickModel: null,
+    routeTools: null,
   };
 
   const localToolCapablePlan: ModelPlan = {
@@ -84,7 +84,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'qwen2.5-coder',
     hasToolModel: false,
     localHasTools: true,
-    toolPickModel: null,
+    routeTools: null,
   };
 
   const fallbackPlan: ModelPlan = {
@@ -92,7 +92,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'llama3',
     hasToolModel: true,
     localHasTools: false,
-    toolPickModel: null,
+    routeTools: null,
   };
 
   const toolCapableAuxWithToolModelPlan: ModelPlan = {
@@ -100,7 +100,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'another-tool-model',
     hasToolModel: true,
     localHasTools: true,
-    toolPickModel: null,
+    routeTools: null,
   };
 
   const routingPlan: ModelPlan = {
@@ -108,7 +108,7 @@ describe('chooseIterationModel', () => {
     auxModel: 'qwen-big',
     hasToolModel: false,
     localHasTools: true,
-    toolPickModel: 'qwen-small',
+    routeTools: 'qwen-small',
   };
 
   it('cloud plan always uses loopModel with tools', () => {
@@ -144,7 +144,7 @@ describe('chooseIterationModel', () => {
     expect(choice).toEqual({ model: 'another-tool-model', tools: toolSchemas, useLocalFirst: false });
   });
 
-  it('routing plan uses toolPickModel with tools on every gather iteration', () => {
+  it('routing plan uses routeTools with tools on every gather iteration', () => {
     expect(chooseIterationModel(routingPlan, 1, false, toolSchemas))
       .toEqual({ model: 'qwen-small', tools: toolSchemas, useLocalFirst: false });
     expect(chooseIterationModel(routingPlan, 4, false, toolSchemas))
@@ -153,39 +153,39 @@ describe('chooseIterationModel', () => {
 });
 
 describe('resolveModelPlan — tool-pick routing', () => {
-  it('enables routing when toolPickModel is set and supports tools', async () => {
+  it('enables routing when routeTools is set and supports tools', async () => {
     vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
     vi.mocked(supportsTools).mockResolvedValue(true);
 
     const plan = await resolveModelPlan('qwen-big', null, 'qwen-small');
 
-    expect(plan.toolPickModel).toBe('qwen-small');
+    expect(plan.routeTools).toBe('qwen-small');
   });
 
-  it('disables routing when toolPickModel cannot call tools', async () => {
+  it('disables routing when routeTools cannot call tools', async () => {
     vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
     vi.mocked(supportsTools).mockImplementation(async (m: string) => m !== 'weak-pick');
 
     const plan = await resolveModelPlan('qwen-big', null, 'weak-pick');
 
-    expect(plan.toolPickModel).toBeNull();
+    expect(plan.routeTools).toBeNull();
   });
 
-  it('disables routing when toolPickModel equals the requested model', async () => {
+  it('disables routing when routeTools equals the requested model', async () => {
     vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
     vi.mocked(supportsTools).mockResolvedValue(true);
 
     const plan = await resolveModelPlan('qwen-big', null, 'qwen-big');
 
-    expect(plan.toolPickModel).toBeNull();
+    expect(plan.routeTools).toBeNull();
   });
 
-  it('leaves routing off when toolPickModel is not configured', async () => {
+  it('leaves routing off when routeTools is not configured', async () => {
     vi.mocked(getAvailableModels).mockReturnValue([{ id: 'qwen-big', isCloud: false }]);
     vi.mocked(supportsTools).mockResolvedValue(true);
 
     const plan = await resolveModelPlan('qwen-big', null);
 
-    expect(plan.toolPickModel).toBeNull();
+    expect(plan.routeTools).toBeNull();
   });
 });

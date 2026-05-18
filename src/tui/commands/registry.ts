@@ -18,9 +18,9 @@ const commands: SlashCommand[] = [
     autoTrigger: true,
   },
   {
-    name: "/toolpickmodel",
-    description: "Route tool-picking to a small model: /toolpickmodel [name|auto]",
-    autoTrigger: true,
+    name: "/routetools",
+    description:
+      "Split a turn: a small model calls tools, your model writes the answer — /routetools [model|off]",
   },
   {
     name: "/temperament",

@@ -11,13 +11,13 @@ export interface ModelPlan {
    * iterations run on it; the requested model synthesises the final answer.
    * Null disables routing — behaviour is then identical to before.
    */
-  toolPickModel: string | null;
+  routeTools: string | null;
 }
 
 export async function resolveModelPlan(
   requestedModel: string,
   configToolModel: string | null | undefined,
-  configToolPickModel?: string | null | undefined,
+  configRouteTools?: string | null | undefined,
 ): Promise<ModelPlan> {
   const { getAvailableModels } = await import('../config/mcp.js');
   const requestedIsCloud = getAvailableModels().find(m => m.id === requestedModel)?.isCloud ?? false;
@@ -25,26 +25,26 @@ export async function resolveModelPlan(
   const auxModel = requestedModel;
   const hasToolModel = loopModel !== auxModel;
   const localHasTools = await supportsTools(auxModel);
-  const toolPickModel = await resolveToolPickModel(configToolPickModel, auxModel);
+  const routeTools = await resolveRouteTools(configRouteTools, auxModel);
 
-  return { loopModel, auxModel, hasToolModel, localHasTools, toolPickModel };
+  return { loopModel, auxModel, hasToolModel, localHasTools, routeTools };
 }
 
 /**
- * Validates the configured tool-pick model. Routing is disabled (returns null)
+ * Validates the configured routing model. Routing is disabled (returns null)
  * when it is unset, identical to the requested model, or cannot call tools —
  * routing a tool-pick step to a tool-less model would be pointless.
  */
-async function resolveToolPickModel(
-  configToolPickModel: string | null | undefined,
+async function resolveRouteTools(
+  configRouteTools: string | null | undefined,
   auxModel: string,
 ): Promise<string | null> {
-  const candidate = configToolPickModel ?? null;
+  const candidate = configRouteTools ?? null;
   if (!candidate || candidate === auxModel) return null;
 
   if (!(await supportsTools(candidate))) {
     process.stderr.write(
-      `[model-routing] toolPickModel "${candidate}" does not support tools; routing disabled\n`,
+      `[model-routing] routeTools model "${candidate}" does not support tools; routing disabled\n`,
     );
     return null;
   }
@@ -67,8 +67,8 @@ export function chooseIterationModel(
   // small tool-pick model. The requested model synthesises the answer in a
   // separate pass (see runOneIteration), so the tool-less-fallback dance
   // below is not needed here.
-  if (plan.toolPickModel) {
-    return { model: plan.toolPickModel, tools: toolSchemas, useLocalFirst: false };
+  if (plan.routeTools) {
+    return { model: plan.routeTools, tools: toolSchemas, useLocalFirst: false };
   }
 
   const useLocalFirst = iteration === 1 && plan.hasToolModel && !plan.localHasTools && !switchedToCloud;

@@ -24,7 +24,7 @@ export async function streamLLMChat(input: {
   canRetryOnError: boolean;
   emit: LLMStreamEmitter;
   /** When true, text is accumulated but not streamed to the user — used for
-   *  gather iterations on the tool-pick model, whose prose is internal. */
+   *  gather iterations on the routing model, whose prose is internal. */
   suppressText?: boolean;
 }): Promise<LLMStreamOutcome> {
   const { sessionId, iteration, model, messages, tools, canRetryOnError, emit, suppressText } = input;
