@@ -44,6 +44,8 @@ export const ConfigSchema = z.object({
   toolModel: z.string().nullable().default(null),
   routeTools: z.string().nullable().default(null),   // small model that picks tools; requested model synthesizes (null = no routing)
   toolCorrectionAttempts: z.number().default(2),   // re-prompt rounds when a tool call fails schema validation (0 = off)
+  diagnosticsCommand: z.string().nullable().default(null),   // project check run after edits (e.g. `tsc --noEmit`); null = off
+  diagnosticsTimeoutMs: z.number().default(60000),   // max time for the diagnostics command before it is killed
   defaultTemperament: z.enum(['neutral', 'sharp', 'warm', 'auto']).default('neutral'),
   contextReservePercent: z.number().default(0.15),
   contextEmergencyThreshold: z.number().default(0.90),
@@ -84,6 +86,8 @@ export const SettingsSchema = z.object({
   agent: z.object({
     maxToolIterations: z.number().default(25),
     toolCorrectionAttempts: z.number().default(2),
+    diagnosticsCommand: z.string().nullable().default(null),
+    diagnosticsTimeoutMs: z.number().default(60000),
   }).optional(),
   session: z.object({
     compactionThreshold: z.number().default(6000),

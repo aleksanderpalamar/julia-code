@@ -49,6 +49,14 @@ export type ObservabilityEvent =
       kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction';
     }
   | {
+      type: 'diagnostics';
+      ts: string;
+      sessionId: string;
+      iteration: number;
+      ok: boolean;
+      durationMs: number;
+    }
+  | {
       type: 'loop_end';
       ts: string;
       sessionId: string;
@@ -143,6 +151,15 @@ export const log = {
     kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction';
   }): void {
     fire({ type: 'retry', ts: now(), ...args });
+  },
+
+  diagnostics(args: {
+    sessionId: string;
+    iteration: number;
+    ok: boolean;
+    durationMs: number;
+  }): void {
+    fire({ type: 'diagnostics', ts: now(), ...args });
   },
 
   loopEnd(args: {

@@ -49,12 +49,20 @@ interface PlannerMetrics {
   cacheHitRate: number | null;
 }
 
+interface DiagnosticsMetrics {
+  total: number;
+  clean: number;
+  problems: number;
+  avgDurationMs: number | null;
+}
+
 export interface AllMetrics {
   orchestration: OrchestrationMetrics;
   subagents: SubagentMetrics;
   loops: LoopMetrics;
   tools: ToolMetrics;
   planner: PlannerMetrics;
+  diagnostics: DiagnosticsMetrics;
 }
 
 function avg(values: number[]): number | null {
@@ -225,11 +233,26 @@ export async function computePlannerMetrics(path?: string): Promise<PlannerMetri
   };
 }
 
+export async function computeDiagnosticsMetrics(path?: string): Promise<DiagnosticsMetrics> {
+  const events = await readEvents(path);
+  const runs = events.filter(e => e.type === 'diagnostics') as Array<
+    Extract<ObservabilityEvent, { type: 'diagnostics' }>
+  >;
+
+  return {
+    total: runs.length,
+    clean: runs.filter(r => r.ok).length,
+    problems: runs.filter(r => !r.ok).length,
+    avgDurationMs: avg(runs.map(r => r.durationMs)),
+  };
+}
+
 export async function getAllMetrics(): Promise<AllMetrics> {
-  const [loops, tools, planner] = await Promise.all([
+  const [loops, tools, planner, diagnostics] = await Promise.all([
     computeLoopMetrics(),
     computeToolMetrics(),
     computePlannerMetrics(),
+    computeDiagnosticsMetrics(),
   ]);
   return {
     orchestration: computeOrchestrationMetrics(),
@@ -237,6 +260,7 @@ export async function getAllMetrics(): Promise<AllMetrics> {
     loops,
     tools,
     planner,
+    diagnostics,
   };
 }
 
@@ -287,6 +311,14 @@ export function formatMetricsForDisplay(m: AllMetrics): string {
   lines.push(`  max iterations    ${m.loops.maxIterations ?? 'n/a'}`);
   lines.push(`  reasons           done=${m.loops.reasons.done} max=${m.loops.reasons.max_iterations} err=${m.loops.reasons.error} abort=${m.loops.reasons.aborted}`);
   lines.push(`  retries           stream=${m.loops.retriesByKind.stream} empty=${m.loops.retriesByKind.empty} det=${m.loops.retriesByKind.deterministic} correction=${m.loops.retriesByKind['tool-correction']}`);
+
+  if (m.diagnostics.total > 0) {
+    lines.push('');
+    lines.push('Diagnostics');
+    lines.push(`  runs              ${m.diagnostics.total}`);
+    lines.push(`  clean/problems    ${m.diagnostics.clean}/${m.diagnostics.problems}`);
+    lines.push(`  avg duration      ${ms(m.diagnostics.avgDurationMs)}`);
+  }
 
   const topTools = Object.entries(m.tools.perTool)
     .sort(([, a], [, b]) => b.calls - a.calls)

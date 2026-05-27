@@ -12,6 +12,7 @@ import { mode } from "./mode.js";
 import { image } from "./image.js";
 import { skill } from "./skill.js";
 import { indexCmd } from "./indexCmd.js";
+import { diagnostics } from "./diagnostics.js";
 
 export const slashCommands: SlashCommand[] = [
   quit,
@@ -26,6 +27,7 @@ export const slashCommands: SlashCommand[] = [
   mode,
   image,
   indexCmd,
+  diagnostics,
   skill,
 ];
 

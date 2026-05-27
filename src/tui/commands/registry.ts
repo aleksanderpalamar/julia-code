@@ -8,6 +8,10 @@ const commands: SlashCommand[] = [
   { name: "/image", description: "Attach image: /image <path> | list | clear" },
   { name: "/index", description: "Build code index: /index | force | status | abort" },
   {
+    name: "/diagnostics",
+    description: "Run a project check after edits and feed errors back: /diagnostics [command|off]",
+  },
+  {
     name: "/mode",
     description: "Cycle mode: Normal → Plan → Accept Edits (Shift+Tab)",
   },
