@@ -69,12 +69,14 @@ function buildReport(command: string, changedFiles: string[], result: ProcessRes
   return body ? `${header}\n${body}` : header;
 }
 
-const defaultProcessRunner: ProcessRunner = (command, { cwd, timeoutMs, signal, env }) =>
+export const defaultProcessRunner: ProcessRunner = (command, { cwd, timeoutMs, signal, env }) =>
   new Promise<ProcessResult>((resolve) => {
+    const isWindows = process.platform === 'win32';
     const child = nodeSpawn(command, {
       cwd,
       env,
       shell: true,
+      detached: !isWindows,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -83,12 +85,30 @@ const defaultProcessRunner: ProcessRunner = (command, { cwd, timeoutMs, signal, 
     let timedOut = false;
     let settled = false;
 
+    // With `shell: true`, killing the child only kills the shell — the real
+    // command (e.g. `pnpm test`) keeps running as an orphan. On POSIX we make
+    // the child a process group leader and signal the whole group; on Windows
+    // there is no equivalent, so a best-effort `child.kill` is the most we can
+    // portably do.
+    const killTree = () => {
+      if (child.pid === undefined) return;
+      if (isWindows) {
+        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        return;
+      }
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      }
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killTree();
     }, timeoutMs);
 
-    const onAbort = () => child.kill('SIGKILL');
+    const onAbort = () => killTree();
     signal?.addEventListener('abort', onAbort, { once: true });
 
     const finish = (code: number | null) => {

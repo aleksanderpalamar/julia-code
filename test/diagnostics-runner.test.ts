@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runDiagnostics, type ProcessRunner, type ProcessResult } from '../src/agent/diagnostics/runner.js';
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  runDiagnostics,
+  defaultProcessRunner,
+  type ProcessRunner,
+  type ProcessResult,
+} from '../src/agent/diagnostics/runner.js';
 
 const baseInput = {
   command: 'tsc --noEmit',
@@ -75,5 +83,47 @@ describe('runDiagnostics', () => {
     };
     const out = await runDiagnostics({ ...baseInput, signal: ctrl.signal, run });
     expect(out).toEqual({ ok: true });
+  });
+});
+
+const describeOnPosix = process.platform === 'win32' ? describe.skip : describe;
+
+describeOnPosix('defaultProcessRunner (integration)', () => {
+  it('kills the entire process tree on timeout, not just the shell', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'julia-diag-runner-'));
+    const pidFile = join(tmp, 'sleep.pid');
+    try {
+      // bash forks `sleep 30` in the background, records its pid, then waits.
+      // Without process-group kill the inner sleep would be orphaned and keep
+      // running after the timeout fires.
+      const command = `sh -c 'sleep 30 & echo $! > ${pidFile}; wait'`;
+
+      const result = await defaultProcessRunner(command, {
+        cwd: tmp,
+        timeoutMs: 250,
+        signal: undefined,
+        env: process.env as Record<string, string>,
+      });
+
+      expect(result.timedOut).toBe(true);
+
+      // Give the kernel a moment to reap the killed group.
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(existsSync(pidFile)).toBe(true);
+      const sleepPid = Number(readFileSync(pidFile, 'utf-8').trim());
+      expect(Number.isFinite(sleepPid)).toBe(true);
+
+      // `kill 0` probes existence without signalling; ESRCH means gone.
+      let stillAlive = true;
+      try {
+        process.kill(sleepPid, 0);
+      } catch (err) {
+        stillAlive = (err as NodeJS.ErrnoException).code !== 'ESRCH';
+      }
+      expect(stillAlive).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
