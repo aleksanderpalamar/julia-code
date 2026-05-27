@@ -17,8 +17,15 @@ const baseInput = {
   signal: undefined,
 };
 
-function runnerReturning(result: ProcessResult): ProcessRunner {
-  return vi.fn(async () => result);
+function runnerReturning(result: Partial<ProcessResult> & { code: number | null }): ProcessRunner {
+  const filled: ProcessResult = {
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    outputCapped: false,
+    ...result,
+  };
+  return vi.fn(async () => filled);
 }
 
 describe('runDiagnostics', () => {
@@ -66,6 +73,16 @@ describe('runDiagnostics', () => {
     if (!out.ok) expect(out.report).toContain('timed out');
   });
 
+  it('flags an output cap kill in the report', async () => {
+    const run = runnerReturning({ code: null, stdout: 'noise', stderr: '', outputCapped: true });
+    const out = await runDiagnostics({ ...baseInput, run });
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.report).toContain('produced excessive output');
+      expect(out.report).not.toContain('timed out');
+    }
+  });
+
   it('skips the run entirely when already aborted', async () => {
     const ctrl = new AbortController();
     ctrl.abort();
@@ -89,6 +106,33 @@ describe('runDiagnostics', () => {
 const describeOnPosix = process.platform === 'win32' ? describe.skip : describe;
 
 describeOnPosix('defaultProcessRunner (integration)', () => {
+  it('caps captured output and kills the child instead of buffering unbounded data', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'julia-diag-cap-'));
+    try {
+      // Infinite loop spewing data; with the cap the runner must kill it and
+      // resolve well before the 5s timeout, with bounded captured output.
+      const command = `sh -c 'while true; do printf "noise"; done'`;
+      const startedAt = Date.now();
+      const result = await defaultProcessRunner(command, {
+        cwd: tmp,
+        timeoutMs: 5000,
+        signal: undefined,
+        env: process.env as Record<string, string>,
+      });
+      const elapsed = Date.now() - startedAt;
+
+      expect(result.outputCapped).toBe(true);
+      expect(result.timedOut).toBe(false);
+      // Allow some slack for the final chunk that arrives between cap-detection
+      // and the child actually dying (kernel buffers etc.), but it must stay
+      // small relative to "unbounded".
+      expect(result.stdout.length + result.stderr.length).toBeLessThan(64 * 1024);
+      expect(elapsed).toBeLessThan(4500);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('kills the entire process tree on timeout, not just the shell', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'julia-diag-runner-'));
     const pidFile = join(tmp, 'sleep.pid');
