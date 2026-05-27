@@ -11,6 +11,7 @@ import {
   formatMetricsForDisplay,
   computeLoopMetrics,
   computeToolMetrics,
+  computeDiagnosticsMetrics,
   type AllMetrics,
 } from '../src/observability/metrics.js';
 
@@ -104,13 +105,14 @@ describe('formatMetricsForDisplay', () => {
     await flushLogger();
 
     const shell = shellOrchestrationAndSubagents();
-    const [planner, loops, tools] = await Promise.all([
+    const [planner, loops, tools, diagnostics] = await Promise.all([
       computePlannerMetrics(),
       computeLoopMetrics(),
       computeToolMetrics(),
+      computeDiagnosticsMetrics(),
     ]);
 
-    const report = formatMetricsForDisplay({ ...shell, planner, loops, tools });
+    const report = formatMetricsForDisplay({ ...shell, planner, loops, tools, diagnostics });
 
     expect(report).toContain('Julia observability stats');
     expect(report).toContain('Planner');

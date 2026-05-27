@@ -88,6 +88,8 @@ export function loadConfig(): Config {
     toolModel: settings?.models?.toolModel,
     routeTools: settings?.models?.routeTools,
     toolCorrectionAttempts: settings?.agent?.toolCorrectionAttempts,
+    diagnosticsCommand: settings?.agent?.diagnosticsCommand,
+    diagnosticsTimeoutMs: settings?.agent?.diagnosticsTimeoutMs,
     defaultTemperament: settings?.temperament?.default,
     contextReservePercent: settings?.context?.reservePercent,
     contextEmergencyThreshold: settings?.context?.emergencyThreshold,

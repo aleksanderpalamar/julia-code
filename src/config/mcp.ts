@@ -78,6 +78,28 @@ export function clearRouteTools(): void {
   });
 }
 
+function ensureAgent(raw: Record<string, any>): Record<string, any> {
+  if (!raw.agent || typeof raw.agent !== 'object' || Array.isArray(raw.agent)) {
+    raw.agent = {};
+  }
+  return raw.agent;
+}
+
+export function setDiagnosticsCommand(command: string): void {
+  updateRawSettings(raw => {
+    const agent = ensureAgent(raw);
+    agent.diagnosticsCommand = command;
+  });
+}
+
+export function clearDiagnosticsCommand(): void {
+  updateRawSettings(raw => {
+    if (raw.agent && typeof raw.agent === 'object') {
+      raw.agent.diagnosticsCommand = null;
+    }
+  });
+}
+
 export function getAvailableModels(): Array<{ id: string; name?: string; isCloud?: boolean }> {
   try {
     const raw = readRawSettings();

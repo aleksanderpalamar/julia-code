@@ -13,6 +13,11 @@ import { runHook } from '../../hooks/runner.js';
 import { getToolParameters, getToolSchema } from '../../tools/registry.js';
 import { validateAndCoerceArgs, formatArgErrors, type ArgError } from '../../tools/validation.js';
 import { attemptCorrection, type ChatStreamFn } from './tool-correction.js';
+import { runDiagnostics } from '../diagnostics/runner.js';
+import { getProjectDir } from '../../config/workspace.js';
+
+/** Tools whose successful run mutates a file and should trigger diagnostics. */
+const FILE_MUTATING_TOOLS = new Set(['write', 'edit']);
 
 /** Consecutive correction failures within one iteration before the loop gives up. */
 const CORRECTION_BREAKER_THRESHOLD = 3;
@@ -52,6 +57,7 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
   } = input;
 
   const breaker: CorrectionBreaker = { consecutiveFailures: 0, disabled: false };
+  const changedFiles = new Set<string>();
 
   for (const tc of toolCalls) {
     if (signal?.aborted) return { aborted: true };
@@ -138,6 +144,10 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     addMessage(sessionId, 'tool', executed.resultText, undefined, tc.id);
     emit.toolResult(toolName, executed.resultText, executed.success);
 
+    if (executed.success && FILE_MUTATING_TOOLS.has(toolName) && typeof toolArgs.path === 'string') {
+      changedFiles.add(toolArgs.path);
+    }
+
     const postHook = await runHook(
       'PostToolUse',
       {
@@ -156,7 +166,50 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     }
   }
 
+  await reportDiagnostics({ sessionId, iteration, changedFiles, signal, emit });
+
   return { aborted: false };
+}
+
+interface ReportDiagnosticsInput {
+  sessionId: string;
+  iteration: number;
+  changedFiles: Set<string>;
+  signal: AbortSignal | undefined;
+  emit: ToolExecutionEmitter;
+}
+
+/**
+ * Runs the configured project check once per iteration after any file edits and
+ * feeds the resulting errors back to the model as a system message, so it can
+ * self-correct on the next iteration. No-op when no command is configured or
+ * nothing was edited — keeping the feature opt-in with zero default cost.
+ */
+async function reportDiagnostics(input: ReportDiagnosticsInput): Promise<void> {
+  const { sessionId, iteration, changedFiles, signal, emit } = input;
+  if (changedFiles.size === 0 || signal?.aborted) return;
+
+  const config = getConfig();
+  const command = config.diagnosticsCommand;
+  if (!command) return;
+
+  emit.chunk('🔎 Verificando diagnósticos...\n');
+  const startedAt = Date.now();
+  const outcome = await runDiagnostics({
+    command,
+    cwd: getProjectDir(),
+    changedFiles: [...changedFiles],
+    timeoutMs: config.diagnosticsTimeoutMs,
+    signal,
+  });
+  if (signal?.aborted) return;
+
+  log.diagnostics({ sessionId, iteration, ok: outcome.ok, durationMs: Date.now() - startedAt });
+
+  if (!outcome.ok) {
+    addMessage(sessionId, 'system', `[diagnostics]\n${outcome.report}`);
+    emit.toolResult('diagnostics', outcome.report, false);
+  }
 }
 
 interface ResolveArgsInput {

@@ -57,10 +57,27 @@ vi.mock('../src/observability/logger.js', () => ({
     toolCall: vi.fn(),
     loopEnd: vi.fn(),
     plannerDecision: vi.fn(),
+    diagnostics: vi.fn(),
   },
 }));
 
+const mockConfig = {
+  toolCorrectionAttempts: 2,
+  diagnosticsCommand: null as string | null,
+  diagnosticsTimeoutMs: 60000,
+};
+
+vi.mock('../src/config/index.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, getConfig: () => mockConfig };
+});
+
+vi.mock('../src/agent/diagnostics/runner.js', () => ({
+  runDiagnostics: vi.fn(async () => ({ ok: true })),
+}));
+
 import { runOneIteration } from '../src/agent/iteration.js';
+import { runDiagnostics } from '../src/agent/diagnostics/runner.js';
 import { addMessage } from '../src/session/manager.js';
 import { evaluateToolCall } from '../src/agent/security-gate.js';
 import { runToolCall } from '../src/agent/tool-executor.js';
@@ -133,6 +150,8 @@ beforeEach(() => {
   vi.mocked(shouldEmergencyCompact).mockReset().mockReturnValue(false);
   vi.mocked(performEmergencyCompaction).mockReset();
   vi.mocked(addMessage).mockReset();
+  vi.mocked(runDiagnostics).mockReset().mockResolvedValue({ ok: true });
+  mockConfig.diagnosticsCommand = null;
 });
 
 describe('runOneIteration / aborted', () => {
@@ -270,6 +289,52 @@ describe('runOneIteration / continue after tool calls', () => {
     expect(outcome.kind).toBe('continue');
     expect(runToolCall).not.toHaveBeenCalled();
     expect(deps.sink.events.find(e => e[0] === 'tool_result')).toBeDefined();
+  });
+});
+
+describe('runOneIteration / diagnostics', () => {
+  const editCall: ToolCall = {
+    id: 't1',
+    function: { name: 'edit', arguments: { path: 'src/x.ts', old_string: 'a', new_string: 'b' } },
+  };
+
+  it('runs the check after an edit and feeds problems back as a system message', async () => {
+    mockConfig.diagnosticsCommand = 'tsc --noEmit';
+    vi.mocked(runDiagnostics).mockResolvedValue({ ok: false, report: 'src/x.ts: error TS1' });
+    chatScript = [{ type: 'tool_call', toolCall: editCall }, { type: 'done' }];
+
+    const deps = makeDeps();
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('continue');
+    expect(vi.mocked(runDiagnostics)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runDiagnostics).mock.calls[0][0]).toMatchObject({
+      command: 'tsc --noEmit',
+      changedFiles: ['src/x.ts'],
+    });
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'system', expect.stringContaining('error TS1'),
+    );
+  });
+
+  it('does not run the check when no command is configured', async () => {
+    chatScript = [{ type: 'tool_call', toolCall: editCall }, { type: 'done' }];
+
+    const deps = makeDeps();
+    await runOneIteration(deps, initial);
+
+    expect(vi.mocked(runDiagnostics)).not.toHaveBeenCalled();
+  });
+
+  it('does not run the check when only non-mutating tools ran', async () => {
+    mockConfig.diagnosticsCommand = 'tsc --noEmit';
+    const readCall: ToolCall = { id: 't1', function: { name: 'read', arguments: { path: 'src/x.ts' } } };
+    chatScript = [{ type: 'tool_call', toolCall: readCall }, { type: 'done' }];
+
+    const deps = makeDeps();
+    await runOneIteration(deps, initial);
+
+    expect(vi.mocked(runDiagnostics)).not.toHaveBeenCalled();
   });
 });
 
