@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { needsToolCalling } from '../src/agent/heuristics.js';
+import { findAnnouncedToolIntent, needsToolCalling } from '../src/agent/heuristics.js';
 
 describe('needsToolCalling / refusal indicators', () => {
   it('detects PT refusals', () => {
@@ -60,5 +60,32 @@ describe('needsToolCalling / neutral text', () => {
     expect(needsToolCalling('A fila de mensagens usa um mutex por sessão.')).toBe(false);
     expect(needsToolCalling('The queue uses a per-session mutex.')).toBe(false);
     expect(needsToolCalling('')).toBe(false);
+  });
+});
+
+describe('findAnnouncedToolIntent', () => {
+  it('returns the earliest positive tool-oriented announcement', () => {
+    const text = 'Primeiro um resumo. Depois vou inspecionar os arquivos. Let me check later.';
+
+    expect(findAnnouncedToolIntent(text)).toEqual({
+      index: text.indexOf('vou inspecionar'),
+      phrase: 'vou inspecionar',
+    });
+  });
+
+  it('accepts punctuation as the end of an announced action', () => {
+    expect(findAnnouncedToolIntent('Vou abrir.')).toEqual({ index: 0, phrase: 'vou abrir' });
+    expect(findAnnouncedToolIntent('Vou ler!')).toEqual({ index: 0, phrase: 'vou ler' });
+  });
+
+  it('does not treat broad tool need as an announced action', () => {
+    expect(findAnnouncedToolIntent('```bash\nnpm test\n```')).toBeNull();
+    expect(findAnnouncedToolIntent('Não consigo acessar os arquivos.')).toBeNull();
+    expect(findAnnouncedToolIntent('npm test')).toBeNull();
+  });
+
+  it('ignores negated Portuguese announcements', () => {
+    expect(findAnnouncedToolIntent('Não vou rodar os testes neste exemplo.')).toBeNull();
+    expect(findAnnouncedToolIntent('Eu nao vou abrir o arquivo.')).toBeNull();
   });
 });

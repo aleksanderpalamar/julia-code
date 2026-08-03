@@ -55,6 +55,11 @@ juju --gateway --host 0.0.0.0 --port 3000      # custom host/port
 | `POST` | `/chat`                  | Chat (full response) |
 | `POST` | `/chat/stream`           | Chat (SSE streaming) |
 
+Chat event streams can include `clear_streaming` when a tentative model response
+must be discarded and `warning` when Julia cannot recover a promised action.
+Both events are additive; existing `thinking`, `chunk`, tool, `done`, and `error`
+events keep their current payloads.
+
 ## Tools
 
 Julia has access to 10 tools that it executes autonomously:
@@ -205,6 +210,7 @@ description: Review a pull request against the team conventions
 when_to_use: User asks to "review PR" or pastes a diff
 argument_hint: <pr-number-or-url>
 user_invocable: true
+expects_tools: true
 ---
 
 Your skill prompt body goes here. Use $ARGUMENTS to inject the user-provided argument.
@@ -213,6 +219,7 @@ Your skill prompt body goes here. Use $ARGUMENTS to inject the user-provided arg
 Behavior:
 - The skill name comes from the `name` frontmatter; if absent, it defaults to the directory name.
 - Skills with `user_invocable: true` show up as slash commands (e.g. `/review-pr`).
+- `expects_tools` defaults to `true`; dialogue-only skills can set it to `false` to disable intent-without-action recovery for their turns.
 - All custom skills are loaded into the system prompt under a `User-Defined Skills (LOWER TRUST)` section — they cannot override system instructions.
 - On name collision with a built-in default skill, the default wins.
 - Each `SKILL.md` is limited to 50 KB and is scanned for prompt-injection patterns before being loaded; rejected files are logged and skipped.

@@ -126,6 +126,7 @@ function makeDeps(override: Partial<IterationDeps> = {}): IterationDeps & { sink
     planMode: false,
     temperament: 'neutral',
     maxIterations: 5,
+    skillExpectsTools: true,
     signal: undefined,
     approvedAllRef: { current: false },
     requestApproval: vi.fn(async () => 'approve'),
@@ -135,7 +136,13 @@ function makeDeps(override: Partial<IterationDeps> = {}): IterationDeps & { sink
   return Object.assign(deps, { sink });
 }
 
-const initial: IterationState = { iteration: 0, switchedToCloud: false, lastHadToolCalls: false, retryCount: 0 };
+const initial: IterationState = {
+  iteration: 0,
+  switchedToCloud: false,
+  lastHadToolCalls: false,
+  retryCount: 0,
+  intentNudgeUsed: false,
+};
 
 beforeEach(() => {
   chatScript = [];
@@ -237,6 +244,20 @@ describe('runOneIteration / tool-pick routing', () => {
       ['s1', 'assistant', 'draft answer', undefined, undefined, undefined, 'big'],
     );
   });
+
+  it('applies intent recovery to the routed synthesis response', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou inspecionar os arquivos agora.' },
+      { type: 'done' },
+    ];
+    const deps = makeDeps({ plan: routingPlan });
+
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('nudge-intent');
+    if (outcome.kind !== 'nudge-intent') throw new Error('unreachable');
+    expect(outcome.state.intentNudgeUsed).toBe(true);
+  });
 });
 
 describe('runOneIteration / error', () => {
@@ -335,6 +356,98 @@ describe('runOneIteration / diagnostics', () => {
     await runOneIteration(deps, initial);
 
     expect(vi.mocked(runDiagnostics)).not.toHaveBeenCalled();
+  });
+});
+
+describe('runOneIteration / intent-without-action', () => {
+  it('returns nudge-intent when the model announces an action but emits no tool call', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json para entender as dependências.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps();
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('nudge-intent');
+    if (outcome.kind !== 'nudge-intent') throw new Error('unreachable');
+    expect(outcome.fullText).toContain('Vou ler o package.json');
+    expect(outcome.state.intentNudgeUsed).toBe(true);
+  });
+
+  it('returns done-with-warning when intent persists after the nudge has been used', async () => {
+    chatScript = [
+      { type: 'text', text: 'Agora vou rodar os testes pra ver se passam.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps();
+    const stateAfterNudge: IterationState = { ...initial, intentNudgeUsed: true };
+    const outcome = await runOneIteration(deps, stateAfterNudge);
+
+    expect(outcome.kind).toBe('done-with-warning');
+    if (outcome.kind !== 'done-with-warning') throw new Error('unreachable');
+    expect(outcome.message).toMatch(/⚠/);
+    expect(outcome.message).toMatch(/anunciou ações/);
+  });
+
+  it('stays silent (done) when the active skill opts out via skillExpectsTools=false', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o repositório e te mostrar.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps({ skillExpectsTools: false });
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('stays silent (done) when the assistant text has no tool-flavored intent', async () => {
+    chatScript = [
+      { type: 'text', text: 'Aqui está um resumo do que entendi do seu pedido.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps();
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('does not nudge valid shell instructions or refusal explanations', async () => {
+    chatScript = [
+      { type: 'text', text: 'Use este comando:\n```bash\nnpm test\n```\nNão consigo prever o resultado sem executá-lo.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('does not nudge a negated announcement', async () => {
+    chatScript = [
+      { type: 'text', text: 'Não vou rodar os testes porque você pediu apenas o comando.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('warns instead of nudging when the iteration budget is exhausted', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json agora.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps({ maxIterations: 1 }), initial);
+
+    expect(outcome.kind).toBe('done-with-warning');
+    if (outcome.kind !== 'done-with-warning') throw new Error('unreachable');
+    expect(outcome.message).toMatch(/limite de iterações/);
   });
 });
 

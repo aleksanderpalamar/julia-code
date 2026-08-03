@@ -1,8 +1,8 @@
 import type { ToolCall } from '../../providers/types.js';
-import { needsToolCalling } from '../heuristics.js';
+import { findAnnouncedToolIntent, needsToolCalling } from '../heuristics.js';
 import type { ModelPlan } from '../model-selection.js';
 
-type PreMessageDecision =
+export type PreMessageDecision =
   | { kind: 'switch-to-cloud'; newModel: string }
   | { kind: 'empty-retry' }
   | { kind: 'proceed' };
@@ -30,4 +30,37 @@ export function decidePreMessage(input: {
   }
 
   return { kind: 'proceed' };
+}
+
+export type PostMessageDecision =
+  | { kind: 'done' }
+  | { kind: 'nudge-intent' }
+  | { kind: 'done-with-warning' };
+
+/**
+ * Decision made AFTER the assistant message has been persisted but BEFORE the
+ * loop reports the turn done. Triggers when the model announced a tool-flavored
+ * action (`Vou ler X`, `let me check`…) yet emitted no `tool_call`. We give
+ * the model exactly one chance to recover via a system nudge when iteration
+ * budget remains; otherwise we surface a visible warning instead of failing
+ * silently.
+ */
+export function decidePostMessage(input: {
+  fullText: string;
+  toolCalls: ToolCall[];
+  intentNudgeUsed: boolean;
+  skillExpectsTools: boolean;
+  hasIterationBudget: boolean;
+}): PostMessageDecision {
+  const {
+    fullText, toolCalls, intentNudgeUsed, skillExpectsTools, hasIterationBudget,
+  } = input;
+
+  if (toolCalls.length > 0) return { kind: 'done' };
+  if (!skillExpectsTools) return { kind: 'done' };
+  if (!findAnnouncedToolIntent(fullText)) return { kind: 'done' };
+
+  return intentNudgeUsed || !hasIterationBudget
+    ? { kind: 'done-with-warning' }
+    : { kind: 'nudge-intent' };
 }

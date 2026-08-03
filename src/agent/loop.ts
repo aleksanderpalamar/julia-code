@@ -9,6 +9,7 @@ import { log } from '../observability/logger.js';
 import { maybeGenerateTitle } from './title-generator.js';
 import { resolveModelPlan } from './model-selection.js';
 import { runOneIteration, type IterationDeps, type IterationState } from './iteration.js';
+import { buildIntentNudge } from './iteration/intent-nudge.js';
 import type { AgentEvents, OrchestrationProgress } from './loop/events.js';
 import { createIterationSink, createOrchestrationSink } from './loop/event-bridge.js';
 import { requestApproval, SessionApprovalState } from './loop/approval-gate.js';
@@ -63,7 +64,14 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     this.temperament = t;
   }
 
-  async run(sessionId: string, userMessage: string, model?: string, images?: string[], skillContent?: string): Promise<void> {
+  async run(
+    sessionId: string,
+    userMessage: string,
+    model?: string,
+    images?: string[],
+    skillContent?: string,
+    skillExpectsTools: boolean = true,
+  ): Promise<void> {
     if (this.running) {
       this.emit('error', 'Agent is already running');
       return;
@@ -90,7 +98,13 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
 
     const approvedAllRef = this.approval.createIterationRef();
-    let state: IterationState = { iteration: 0, switchedToCloud: false, lastHadToolCalls: false, retryCount: 0 };
+    let state: IterationState = {
+      iteration: 0,
+      switchedToCloud: false,
+      lastHadToolCalls: false,
+      retryCount: 0,
+      intentNudgeUsed: false,
+    };
     let stopHookActive = false;
 
     try {
@@ -175,6 +189,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         temperament: this.temperament,
         maxIterations,
         extraSystemContent: skillContent,
+        skillExpectsTools,
         signal: this.abortController.signal,
         approvedAllRef,
         requestApproval: (toolName, args) => requestApproval({ toolName, args, emitter: this }),
@@ -189,9 +204,17 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           continue;
         }
 
+        if (outcome.kind === 'nudge-intent') {
+          this.emit('clear_streaming');
+          addMessage(sessionId, 'system', buildIntentNudge(outcome.fullText));
+          log.retry({ sessionId, iteration: outcome.state.iteration, kind: 'intent-nudge' });
+          state = outcome.state;
+          continue;
+        }
+
         this.approval.syncFromRef(approvedAllRef);
 
-        if (outcome.kind === 'done') {
+        if (outcome.kind === 'done' || outcome.kind === 'done-with-warning') {
           const stopEvent = this.options.isSubagent ? 'SubagentStop' : 'Stop';
           const stopHook = await runHook(stopEvent, {
             session_id: sessionId,
@@ -205,6 +228,9 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
             addMessage(sessionId, 'system', `[${stopEvent} hook] ${reason}`);
             state = { ...state, iteration: state.iteration + 1 };
             continue;
+          }
+          if (outcome.kind === 'done-with-warning') {
+            this.emit('warning', outcome.message);
           }
           log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'done' });
           this.emit('done', outcome.fullText);

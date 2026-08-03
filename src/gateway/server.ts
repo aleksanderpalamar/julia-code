@@ -17,6 +17,25 @@ interface GatewayOptions {
   port?: number;
 }
 
+type RecoveryGatewayEvent = 'clear_streaming' | 'warning';
+
+/** Binds recovery events shared by JSON and SSE gateway adapters. */
+export function attachGatewayRecoveryEvents(
+  eventSource: AgentLoop,
+  emit: (event: RecoveryGatewayEvent, data: unknown) => void,
+): () => void {
+  const onClearStreaming = () => emit('clear_streaming', {});
+  const onWarning = (message: string) => emit('warning', { message });
+
+  eventSource.on('clear_streaming', onClearStreaming);
+  eventSource.on('warning', onWarning);
+
+  return () => {
+    eventSource.off('clear_streaming', onClearStreaming);
+    eventSource.off('warning', onWarning);
+  };
+}
+
 export function startGateway(options: GatewayOptions = {}) {
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 18800;
@@ -108,6 +127,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     agent.on('chunk', onChunk);
     agent.on('tool_call', onToolCall);
     agent.on('tool_result', onToolResult);
+    const detachRecoveryEvents = attachGatewayRecoveryEvents(
+      agent,
+      (type, data) => events.push({ type, data }),
+    );
 
     try {
       await queue.enqueue(sessionId, message, model);
@@ -115,6 +138,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       agent.off('chunk', onChunk);
       agent.off('tool_call', onToolCall);
       agent.off('tool_result', onToolResult);
+      detachRecoveryEvents();
     }
 
     const messages = getMessages(sessionId);
@@ -159,6 +183,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     agent.on('tool_result', onToolResult);
     agent.on('done', onDone);
     agent.on('error', onError);
+    const detachRecoveryEvents = attachGatewayRecoveryEvents(agent, send);
 
     try {
       await queue.enqueue(sessionId, body.message as string, model);
@@ -169,6 +194,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       agent.off('tool_result', onToolResult);
       agent.off('done', onDone);
       agent.off('error', onError);
+      detachRecoveryEvents();
     }
 
     res.end();

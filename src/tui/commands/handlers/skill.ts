@@ -36,6 +36,7 @@ export const skill: SlashCommand = {
     }
 
     ctx.addSystemEntry(`[Skill ativada: ${skillCmd.skillName}]`);
+    const skillExpectsTools = found.frontmatter?.expects_tools !== false;
     ctx.sendMessage(
       ctx.session.id,
       args,
@@ -44,6 +45,7 @@ export const skill: SlashCommand = {
       imagesToSend,
       ctx.temperament,
       applyArguments(found.content, args),
+      skillExpectsTools,
     );
     return true;
   },

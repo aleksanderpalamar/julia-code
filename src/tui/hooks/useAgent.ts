@@ -99,6 +99,16 @@ export function useAgent(onSessionChanged?: () => void) {
       setEntries(e => [...e, { type: 'error', content: error }]);
     };
 
+    const onWarning = (message: string) => {
+      setStreamingText(prev => {
+        if (prev.trim()) {
+          setEntries(e => [...e, { type: 'assistant', content: prev }]);
+        }
+        return '';
+      });
+      setEntries(e => [...e, { type: 'warning', content: message }]);
+    };
+
     const onApprovalNeeded = (toolName: string, args: Record<string, unknown>, respond: (result: ApprovalResult) => void) => {
       setPendingApproval({ toolName, args, respond });
     };
@@ -163,6 +173,7 @@ export function useAgent(onSessionChanged?: () => void) {
       subagent_chunk: onSubagentChunk,
       subagent_status: onSubagentStatus,
       done: onDone,
+      warning: onWarning,
       error: onError,
     };
 
@@ -183,7 +194,16 @@ export function useAgent(onSessionChanged?: () => void) {
   }, [agent]);
 
   const sendMessage = useCallback(
-    (sessionId: string, message: string, model?: string, mode?: AgentMode, images?: string[], temperament?: Temperament, skillContent?: string) => {
+    (
+      sessionId: string,
+      message: string,
+      model?: string,
+      mode?: AgentMode,
+      images?: string[],
+      temperament?: Temperament,
+      skillContent?: string,
+      skillExpectsTools?: boolean,
+    ) => {
       const agent = queueRef.current!.getAgent();
       if (mode === 'plan') {
         agent.setExcludeTools(WRITE_TOOLS);
@@ -198,7 +218,7 @@ export function useAgent(onSessionChanged?: () => void) {
         ? `${Array.from({ length: imageCount }, (_, i) => `[Image #${i + 1}]`).join(' ')} ${message}`
         : message;
       setEntries(e => [...e, { type: 'user', content: userContent }]);
-      queueRef.current!.enqueue(sessionId, message, model, images, skillContent);
+      queueRef.current!.enqueue(sessionId, message, model, images, skillContent, skillExpectsTools);
     },
     []
   );

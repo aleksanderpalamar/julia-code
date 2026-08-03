@@ -35,6 +35,7 @@ function parseFrontmatter(raw: string): { frontmatter: SkillFrontmatter; body: s
     if (key === 'argument_hint')  frontmatter.argument_hint = value;
     if (key === 'user_invocable') frontmatter.user_invocable = value === 'true';
     if (key === 'always_load')    frontmatter.always_load = value !== 'false';
+    if (key === 'expects_tools')  frontmatter.expects_tools = value !== 'false';
   }
   return { frontmatter, body };
 }

@@ -21,5 +21,6 @@ export interface AgentEvents {
   subagent_chunk: [taskId: string, label: string, text: string];
   subagent_status: [taskId: string, label: string, status: string, durationMs?: number];
   done: [fullText: string];
+  warning: [message: string];
   error: [error: string];
 }
