@@ -149,6 +149,38 @@ describe('findDeferredToolIntent', () => {
     )).toBeNull();
   });
 
+  it('keeps an announcement pending when follow-up text only asks the user to wait', () => {
+    expect(findDeferredToolIntent('Let me check the file. One moment please.')).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+    expect(findDeferredToolIntent('Vou verificar o arquivo. Aguarde um momento.')).toEqual({
+      index: 0,
+      phrase: 'vou verificar',
+    });
+    expect(findDeferredToolIntent('Let me check the file. Thanks for your patience.')).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+  });
+
+  it('keeps an announcement pending when the follow-up is another deferred action', () => {
+    expect(findDeferredToolIntent("Let me check the file. I'll open it now.")).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+    expect(findDeferredToolIntent('Vou verificar o arquivo. Estou consultando agora.')).toEqual({
+      index: 0,
+      phrase: 'vou verificar',
+    });
+  });
+
+  it('accepts an actual result even when it follows waiting language', () => {
+    expect(findDeferredToolIntent(
+      'Let me check the file. One moment please. It contains two entries.',
+    )).toBeNull();
+  });
+
   it('ignores a direct answer completed in the same sentence', () => {
     const mentalAnswer = 'Let me check mentally: 2 + 2 is 4.';
     const explicitAnswer = 'Let me check: the answer is 4.';

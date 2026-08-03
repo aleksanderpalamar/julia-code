@@ -20,13 +20,13 @@ export function findAnnouncedToolIntent(text: string): AnnouncedToolIntent | nul
 
 /**
  * Finds an announced action that is still pending at the end of the response.
- * An announcement followed by another substantive sentence is treated as part
- * of an answer, not as a deferred tool call.
+ * A later sentence completes the announcement only when it contains something
+ * beyond waiting language or another deferred action.
  */
 export function findDeferredToolIntent(text: string): AnnouncedToolIntent | null {
   return findAnnouncedToolIntents(text).find(intent => {
     const sentenceEnd = findSentenceEnd(text, intent.index);
-    return !containsSubstantiveText(text.slice(sentenceEnd));
+    return !containsCompletedFollowUp(text.slice(sentenceEnd));
   }) ?? null;
 }
 
@@ -131,6 +131,20 @@ function findSentenceEnd(text: string, index: number): number {
 
 function containsSubstantiveText(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text);
+}
+
+function containsCompletedFollowUp(text: string): boolean {
+  const clauses = text.split(/(?:[.!?](?=\s|$)|\n)+/u);
+  return clauses.some(clause => containsSubstantiveText(clause) && !isDeferredFollowUp(clause));
+}
+
+function isDeferredFollowUp(text: string): boolean {
+  if (findAnnouncedToolIntent(text)) return true;
+
+  const normalized = normalizeIntentText(text).trim();
+  const englishDeferral = /^(?:one moment(?: please)?|just (?:a|one) moment(?: please)?|please wait|wait (?:a|one) moment|hold on|give me (?:a|one) moment|i(?:'m| am) (?:checking|looking|working on it)|i(?:'ll| will) (?:get back|return|report back)|thanks? for (?:your )?patience)\b/u;
+  const portugueseDeferral = /^(?:um momento(?: por favor)?|s[oó] um momento(?: por favor)?|por favor aguarde|aguarde|espere (?:um|s[oó] um) momento|estou (?:verificando|checando|consultando|buscando|trabalhando nisso)|j[aá] volto|retorno em seguida|vou retornar|obrigad[oa] pela paci[eê]ncia)\b/u;
+  return englishDeferral.test(normalized) || portugueseDeferral.test(normalized);
 }
 
 function isCompletedDirectAnswer(text: string, intent: AnnouncedToolIntent): boolean {

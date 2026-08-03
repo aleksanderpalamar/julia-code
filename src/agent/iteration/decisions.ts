@@ -38,8 +38,8 @@ export type PostMessageDecision =
   | { kind: 'done-with-warning' };
 
 /**
- * Decision made AFTER the assistant message has been persisted but BEFORE the
- * loop reports the turn done. Triggers when the model ends its response with a
+ * Decision made before a text-only assistant message is persisted and before
+ * the loop reports the turn done. Triggers when the model ends its response with a
  * still-pending tool-flavored action (`Vou ler X`, `let me check`…) yet emitted
  * no `tool_call`. We give the model exactly one chance to recover via a system
  * nudge when iteration budget remains; otherwise we surface a visible warning

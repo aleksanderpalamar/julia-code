@@ -21,11 +21,16 @@ vi.mock('../src/agent/context.js', () => ({
   buildContext: vi.fn(async (
     _sessionId: string,
     _model: string,
-    options?: { transientSystemContent?: string },
+    options?: { transientSystemContent?: string; transientAssistantContent?: string },
   ) => ({
-    messages: options?.transientSystemContent
-      ? [{ role: 'system', content: options.transientSystemContent }]
-      : [],
+    messages: [
+      ...(options?.transientSystemContent
+        ? [{ role: 'system' as const, content: options.transientSystemContent }]
+        : []),
+      ...(options?.transientAssistantContent
+        ? [{ role: 'assistant' as const, content: options.transientAssistantContent }]
+        : []),
+    ],
     budget: { total: 8000, system: 0, reserved: 0, available: 8000 },
     health: { level: 'ok', usedTokens: 0, totalTokens: 8000, pctUsed: 0 } as ContextHealth,
   })),
@@ -221,19 +226,26 @@ describe('runOneIteration / done', () => {
 
     expect(outcome).toEqual({ kind: 'done', fullText: 'hello world' });
     expect(deps.sink.events.find(e => e[0] === 'usage')).toBeDefined();
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'hello world', undefined, undefined, undefined, 'claude-sonnet',
+    );
   });
 
-  it('adds transient system content only to the current model request', async () => {
+  it('adds transient recovery content only to the current model request', async () => {
     chatScript = [{ type: 'text', text: 'recovered' }, { type: 'done' }];
 
     await runOneIteration(
-      makeDeps({ transientSystemContent: '[intent-without-action] act now' }),
+      makeDeps({
+        transientSystemContent: '[intent-without-action] act now',
+        transientAssistantContent: 'I will check the file.',
+      }),
       initial,
     );
     await runOneIteration(makeDeps(), initial);
 
     expect(chatMessages[0]).toEqual([
       { role: 'system', content: '[intent-without-action] act now' },
+      { role: 'assistant', content: 'I will check the file.' },
     ]);
     expect(chatMessages[1]).toEqual([]);
   });
@@ -281,6 +293,7 @@ describe('runOneIteration / tool-pick routing', () => {
     expect(outcome.kind).toBe('nudge-intent');
     if (outcome.kind !== 'nudge-intent') throw new Error('unreachable');
     expect(outcome.state.intentNudgeUsed).toBe(true);
+    expect(vi.mocked(addMessage)).not.toHaveBeenCalled();
   });
 });
 
@@ -397,6 +410,19 @@ describe('runOneIteration / intent-without-action', () => {
     if (outcome.kind !== 'nudge-intent') throw new Error('unreachable');
     expect(outcome.fullText).toContain('Vou ler o package.json');
     expect(outcome.state.intentNudgeUsed).toBe(true);
+    expect(vi.mocked(addMessage)).not.toHaveBeenCalled();
+  });
+
+  it('returns nudge-intent when the announcement is followed only by waiting text', async () => {
+    chatScript = [
+      { type: 'text', text: 'Let me check the file. One moment please.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('nudge-intent');
+    expect(vi.mocked(addMessage)).not.toHaveBeenCalled();
   });
 
   it('returns done-with-warning when intent persists after the nudge has been used', async () => {
@@ -413,6 +439,61 @@ describe('runOneIteration / intent-without-action', () => {
     if (outcome.kind !== 'done-with-warning') throw new Error('unreachable');
     expect(outcome.message).toMatch(/⚠/);
     expect(outcome.message).toMatch(/anunciou ações/);
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'Agora vou rodar os testes pra ver se passam.',
+      undefined, undefined, undefined, 'claude-sonnet',
+    );
+  });
+
+  it('persists only the recovered answer after discarding the tentative draft', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json agora.' },
+      { type: 'done' },
+    ];
+
+    const first = await runOneIteration(makeDeps(), initial);
+    expect(first.kind).toBe('nudge-intent');
+    if (first.kind !== 'nudge-intent') throw new Error('unreachable');
+
+    chatScript = [{ type: 'text', text: 'O package usa Vitest.' }, { type: 'done' }];
+    const recovered = await runOneIteration(makeDeps({
+      transientSystemContent: '[intent-without-action] act now',
+      transientAssistantContent: first.fullText,
+    }), first.state);
+
+    expect(recovered).toEqual({ kind: 'done', fullText: 'O package usa Vitest.' });
+    expect(vi.mocked(addMessage)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'O package usa Vitest.',
+      undefined, undefined, undefined, 'claude-sonnet',
+    );
+  });
+
+  it('persists only the terminal draft when recovery ends with a warning', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json agora.' },
+      { type: 'done' },
+    ];
+
+    const first = await runOneIteration(makeDeps(), initial);
+    expect(first.kind).toBe('nudge-intent');
+    if (first.kind !== 'nudge-intent') throw new Error('unreachable');
+
+    chatScript = [
+      { type: 'text', text: 'Ainda vou verificar o package.json.' },
+      { type: 'done' },
+    ];
+    const failed = await runOneIteration(makeDeps({
+      transientSystemContent: '[intent-without-action] act now',
+      transientAssistantContent: first.fullText,
+    }), first.state);
+
+    expect(failed.kind).toBe('done-with-warning');
+    expect(vi.mocked(addMessage)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'Ainda vou verificar o package.json.',
+      undefined, undefined, undefined, 'claude-sonnet',
+    );
   });
 
   it('stays silent (done) when the active skill opts out via skillExpectsTools=false', async () => {

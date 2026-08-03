@@ -33,6 +33,8 @@ export interface IterationDeps {
   extraSystemContent?: string;
   /** Static trusted instruction supplied only to this iteration; never persisted. */
   transientSystemContent?: string;
+  /** Discarded assistant draft supplied only to the recovery iteration; never persisted. */
+  transientAssistantContent?: string;
   /**
    * Whether the active skill (or default flow) expects the model to use tools.
    * Dialogue-only skills set this `false` via `expects_tools: false` to opt out
@@ -69,7 +71,8 @@ export async function runOneIteration(
 ): Promise<IterationOutcome> {
   const {
     sessionId, plan, toolSchemas, allowRules, planMode, temperament, maxIterations,
-    extraSystemContent, transientSystemContent, signal, approvedAllRef, requestApproval, emit,
+    extraSystemContent, transientSystemContent, transientAssistantContent,
+    signal, approvedAllRef, requestApproval, emit,
   } = deps;
 
   if (signal?.aborted) return { kind: 'aborted' };
@@ -96,7 +99,7 @@ export async function runOneIteration(
     auxModel: plan.auxModel,
     options: {
       planMode, temperament, iteration, maxIterations,
-      extraSystemContent, transientSystemContent,
+      extraSystemContent, transientSystemContent, transientAssistantContent,
     },
     emit,
   });
@@ -162,25 +165,21 @@ export async function runOneIteration(
     });
   }
 
-  addMessage(
-    sessionId,
-    'assistant',
-    fullText,
-    toolCalls.length > 0 ? toolCalls : undefined,
-    undefined,
-    undefined,
-    currentModel,
-  );
-
   if (toolCalls.length === 0) {
-    return decideTextOnlyOutcome(deps, fullText, {
+    const outcome = decideTextOnlyOutcome(deps, fullText, {
       iteration,
       switchedToCloud,
       lastHadToolCalls,
       retryCount,
       intentNudgeUsed,
     });
+    if (outcome.kind !== 'nudge-intent') {
+      addMessage(sessionId, 'assistant', fullText, undefined, undefined, undefined, currentModel);
+    }
+    return outcome;
   }
+
+  addMessage(sessionId, 'assistant', fullText, toolCalls, undefined, undefined, currentModel);
 
   retryCount = 0;
 
@@ -219,7 +218,7 @@ async function runSynthesisPass(
 ): Promise<IterationOutcome> {
   const {
     sessionId, plan, planMode, temperament, maxIterations,
-    extraSystemContent, transientSystemContent, emit,
+    extraSystemContent, transientSystemContent, transientAssistantContent, emit,
   } = deps;
   const { iteration } = state;
 
@@ -231,7 +230,7 @@ async function runSynthesisPass(
     auxModel: plan.auxModel,
     options: {
       planMode, temperament, iteration, maxIterations,
-      extraSystemContent, transientSystemContent,
+      extraSystemContent, transientSystemContent, transientAssistantContent,
     },
     emit,
   });
@@ -253,8 +252,11 @@ async function runSynthesisPass(
     };
   }
 
-  addMessage(sessionId, 'assistant', streamed.fullText, undefined, undefined, undefined, plan.auxModel);
-  return decideTextOnlyOutcome(deps, streamed.fullText, state);
+  const outcome = decideTextOnlyOutcome(deps, streamed.fullText, state);
+  if (outcome.kind !== 'nudge-intent') {
+    addMessage(sessionId, 'assistant', streamed.fullText, undefined, undefined, undefined, plan.auxModel);
+  }
+  return outcome;
 }
 
 function decideTextOnlyOutcome(

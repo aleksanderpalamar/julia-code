@@ -145,6 +145,9 @@ describe('AgentLoop / intent recovery lifecycle', () => {
     expect(mocks.runOneIteration.mock.calls[1][0].transientSystemContent).toContain(
       '[intent-without-action]',
     );
+    expect(mocks.runOneIteration.mock.calls[1][0].transientAssistantContent).toBe(
+      'Vou ler o package.json agora.',
+    );
     expect(mocks.addMessage).not.toHaveBeenCalledWith(
       'session-1',
       'system',
@@ -195,7 +198,11 @@ describe('AgentLoop / intent recovery lifecycle', () => {
     expect(mocks.runOneIteration.mock.calls[1][0].transientSystemContent).toContain(
       '[intent-without-action]',
     );
+    expect(mocks.runOneIteration.mock.calls[1][0].transientAssistantContent).toBe(
+      'Vou ler o package.json agora.',
+    );
     expect(mocks.runOneIteration.mock.calls[2][0].transientSystemContent).toBeUndefined();
+    expect(mocks.runOneIteration.mock.calls[2][0].transientAssistantContent).toBeUndefined();
     expect(mocks.addMessage.mock.calls.filter(call => call[1] === 'system')).toHaveLength(0);
   });
 });

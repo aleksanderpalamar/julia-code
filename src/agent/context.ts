@@ -21,6 +21,7 @@ interface BuildContextOptions {
   maxIterations?: number;
   extraSystemContent?: string;
   transientSystemContent?: string;
+  transientAssistantContent?: string;
 }
 
 interface BuildContextResult {
@@ -126,6 +127,12 @@ export async function buildContext(
         }
       }
     }
+  }
+
+  // Recovery drafts are untrusted model output. Keep them in their original
+  // assistant role and only in the iteration that explicitly supplied them.
+  if (options?.transientAssistantContent) {
+    messages.push({ role: 'assistant', content: options.transientAssistantContent });
   }
 
   const health = assessHealth(messages, budget);
