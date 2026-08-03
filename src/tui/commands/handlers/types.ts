@@ -27,6 +27,7 @@ export interface SlashCommandContext {
     images?: string[],
     temperament?: Temperament,
     skillContent?: string,
+    skillExpectsTools?: boolean,
   ) => void;
 }
 

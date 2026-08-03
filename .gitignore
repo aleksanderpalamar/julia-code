@@ -4,3 +4,9 @@ data/julia.db
 .env
 *.db
 arquitetura.md
+
+# Local AI-agent engineering artifacts
+/ARCHITECTURE_BRIEF.md
+/DOMAIN_MODEL.md
+/CONVENTIONS.md
+/TASKS.md

@@ -107,6 +107,7 @@ describe('observability/metrics (JSONL)', () => {
     log.loopEnd({ sessionId: 's3', iterations: 25, reason: 'max_iterations' });
     log.retry({ sessionId: 's1', iteration: 2, kind: 'stream' });
     log.retry({ sessionId: 's2', iteration: 4, kind: 'empty' });
+    log.retry({ sessionId: 's3', iteration: 24, kind: 'intent-nudge' });
 
     await flushLogger();
 
@@ -117,6 +118,7 @@ describe('observability/metrics (JSONL)', () => {
     expect(metrics.reasons.max_iterations).toBe(1);
     expect(metrics.retriesByKind.stream).toBe(1);
     expect(metrics.retriesByKind.empty).toBe(1);
+    expect(metrics.retriesByKind['intent-nudge']).toBe(1);
     expect(metrics.iterationHistogram['3']).toBe(1);
     expect(metrics.iterationHistogram['7']).toBe(1);
     expect(metrics.iterationHistogram['25']).toBe(1);

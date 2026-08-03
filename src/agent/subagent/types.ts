@@ -21,6 +21,8 @@ export interface SubagentEvents {
   'task:completed': [taskId: string, result: string];
   'task:failed': [taskId: string, error: string];
   'task:chunk': [taskId: string, text: string];
+  'task:clear': [taskId: string];
+  'task:warning': [taskId: string, message: string];
 }
 
 export interface QueuedItem {

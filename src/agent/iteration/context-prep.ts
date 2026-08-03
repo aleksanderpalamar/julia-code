@@ -11,6 +11,8 @@ interface ContextOptions {
   iteration: number;
   maxIterations: number;
   extraSystemContent?: string;
+  transientSystemContent?: string;
+  transientAssistantContent?: string;
 }
 
 interface PreparedContext {

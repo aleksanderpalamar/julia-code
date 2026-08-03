@@ -7,7 +7,7 @@ import { log } from '../observability/logger.js';
 import { chooseIterationModel, type ModelPlan } from './model-selection.js';
 import { prepareIterationContext } from './iteration/context-prep.js';
 import { streamLLMChat } from './iteration/llm-chat.js';
-import { decidePreMessage } from './iteration/decisions.js';
+import { decidePreMessage, decidePostMessage } from './iteration/decisions.js';
 import { executeIterationTools } from './iteration/tool-execution.js';
 
 export interface IterationEventSink {
@@ -31,6 +31,16 @@ export interface IterationDeps {
   temperament: string;
   maxIterations: number;
   extraSystemContent?: string;
+  /** Static trusted instruction supplied only to this iteration; never persisted. */
+  transientSystemContent?: string;
+  /** Discarded assistant draft supplied only to the recovery iteration; never persisted. */
+  transientAssistantContent?: string;
+  /**
+   * Whether the active skill (or default flow) expects the model to use tools.
+   * Dialogue-only skills set this `false` via `expects_tools: false` to opt out
+   * of the intent-without-action nudge/warning path.
+   */
+  skillExpectsTools: boolean;
   signal: AbortSignal | undefined;
   /** Mutable across iterations — flipped by the security gate when the user picks "approve all". */
   approvedAllRef: { current: boolean };
@@ -43,11 +53,17 @@ export interface IterationState {
   switchedToCloud: boolean;
   lastHadToolCalls: boolean;
   retryCount: number;
+  /** Set after the intent-without-action nudge has been injected exactly once per turn. */
+  intentNudgeUsed: boolean;
 }
 
-type IterationOutcome =
-  | { kind: 'continue'; state: IterationState }
+export type IterationContinuationReason = 'internal-retry' | 'model-switch' | 'tool-calls';
+
+export type IterationOutcome =
+  | { kind: 'continue'; state: IterationState; reason: IterationContinuationReason }
   | { kind: 'done'; fullText: string }
+  | { kind: 'nudge-intent'; fullText: string; state: IterationState }
+  | { kind: 'done-with-warning'; fullText: string; message: string }
   | { kind: 'aborted' }
   | { kind: 'error'; message: string };
 
@@ -57,13 +73,14 @@ export async function runOneIteration(
 ): Promise<IterationOutcome> {
   const {
     sessionId, plan, toolSchemas, allowRules, planMode, temperament, maxIterations,
-    extraSystemContent, signal, approvedAllRef, requestApproval, emit,
+    extraSystemContent, transientSystemContent, transientAssistantContent,
+    signal, approvedAllRef, requestApproval, emit,
   } = deps;
 
   if (signal?.aborted) return { kind: 'aborted' };
 
   const iteration = prevState.iteration + 1;
-  let { switchedToCloud, lastHadToolCalls, retryCount } = prevState;
+  let { switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed } = prevState;
 
   emit.thinking();
 
@@ -82,7 +99,10 @@ export async function runOneIteration(
     sessionId,
     currentModel,
     auxModel: plan.auxModel,
-    options: { planMode, temperament, iteration, maxIterations, extraSystemContent },
+    options: {
+      planMode, temperament, iteration, maxIterations,
+      extraSystemContent, transientSystemContent, transientAssistantContent,
+    },
     emit,
   });
 
@@ -102,7 +122,11 @@ export async function runOneIteration(
   }
   if (streamed.kind === 'retry') {
     retryCount++;
-    return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
+    return {
+      kind: 'continue',
+      reason: 'internal-retry',
+      state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
+    };
   }
 
   const { fullText, toolCalls } = streamed;
@@ -116,35 +140,51 @@ export async function runOneIteration(
     switchedToCloud = true;
     emit.chunk(`🔄 Trocando para ${decision.newModel} para executar ferramentas...\n\n`);
     emit.modelSwitch(decision.newModel);
-    return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
+    return {
+      kind: 'continue',
+      reason: 'model-switch',
+      state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
+    };
   }
 
   if (decision.kind === 'empty-retry') {
     retryCount++;
     log.retry({ sessionId, iteration, kind: 'empty' });
-    return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
+    return {
+      kind: 'continue',
+      reason: 'internal-retry',
+      state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
+    };
   }
 
   // Routing: the small gather model emitted no tool calls — it has gathered
   // enough. Discard its draft and synthesise the answer with the requested
   // model in a dedicated pass.
   if (routingActive && toolCalls.length === 0) {
-    return runSynthesisPass(deps, iteration);
+    return runSynthesisPass(deps, {
+      iteration,
+      switchedToCloud,
+      lastHadToolCalls,
+      retryCount,
+      intentNudgeUsed,
+    });
   }
-
-  addMessage(
-    sessionId,
-    'assistant',
-    fullText,
-    toolCalls.length > 0 ? toolCalls : undefined,
-    undefined,
-    undefined,
-    currentModel,
-  );
 
   if (toolCalls.length === 0) {
-    return { kind: 'done', fullText };
+    const outcome = decideTextOnlyOutcome(deps, fullText, {
+      iteration,
+      switchedToCloud,
+      lastHadToolCalls,
+      retryCount,
+      intentNudgeUsed,
+    });
+    if (outcome.kind !== 'nudge-intent') {
+      addMessage(sessionId, 'assistant', fullText, undefined, undefined, undefined, currentModel);
+    }
+    return outcome;
   }
+
+  addMessage(sessionId, 'assistant', fullText, toolCalls, undefined, undefined, currentModel);
 
   retryCount = 0;
 
@@ -166,7 +206,11 @@ export async function runOneIteration(
   if (aborted) return { kind: 'aborted' };
 
   lastHadToolCalls = true;
-  return { kind: 'continue', state: { iteration, switchedToCloud, lastHadToolCalls, retryCount } };
+  return {
+    kind: 'continue',
+    reason: 'tool-calls',
+    state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
+  };
 }
 
 /**
@@ -174,8 +218,15 @@ export async function runOneIteration(
  * from the full context the small routing model gathered. No tools are
  * offered — gathering is complete — and the output is streamed to the user.
  */
-async function runSynthesisPass(deps: IterationDeps, iteration: number): Promise<IterationOutcome> {
-  const { sessionId, plan, planMode, temperament, maxIterations, extraSystemContent, emit } = deps;
+async function runSynthesisPass(
+  deps: IterationDeps,
+  state: IterationState,
+): Promise<IterationOutcome> {
+  const {
+    sessionId, plan, planMode, temperament, maxIterations,
+    extraSystemContent, transientSystemContent, transientAssistantContent, emit,
+  } = deps;
+  const { iteration } = state;
 
   emit.thinking();
 
@@ -183,7 +234,10 @@ async function runSynthesisPass(deps: IterationDeps, iteration: number): Promise
     sessionId,
     currentModel: plan.auxModel,
     auxModel: plan.auxModel,
-    options: { planMode, temperament, iteration, maxIterations, extraSystemContent },
+    options: {
+      planMode, temperament, iteration, maxIterations,
+      extraSystemContent, transientSystemContent, transientAssistantContent,
+    },
     emit,
   });
 
@@ -204,6 +258,44 @@ async function runSynthesisPass(deps: IterationDeps, iteration: number): Promise
     };
   }
 
-  addMessage(sessionId, 'assistant', streamed.fullText, undefined, undefined, undefined, plan.auxModel);
-  return { kind: 'done', fullText: streamed.fullText };
+  const outcome = decideTextOnlyOutcome(deps, streamed.fullText, state);
+  if (outcome.kind !== 'nudge-intent') {
+    addMessage(sessionId, 'assistant', streamed.fullText, undefined, undefined, undefined, plan.auxModel);
+  }
+  return outcome;
+}
+
+function decideTextOnlyOutcome(
+  deps: IterationDeps,
+  fullText: string,
+  state: IterationState,
+): IterationOutcome {
+  const post = decidePostMessage({
+    fullText,
+    toolCalls: [],
+    intentNudgeUsed: state.intentNudgeUsed,
+    skillExpectsTools: deps.skillExpectsTools,
+    hasIterationBudget: state.iteration < deps.maxIterations,
+  });
+
+  if (post.kind === 'nudge-intent') {
+    return {
+      kind: 'nudge-intent',
+      fullText,
+      state: { ...state, intentNudgeUsed: true },
+    };
+  }
+
+  if (post.kind === 'done-with-warning') {
+    const reason = state.intentNudgeUsed
+      ? 'já tentei lembrá-lo uma vez'
+      : 'o limite de iterações não permite uma tentativa de recuperação';
+    return {
+      kind: 'done-with-warning',
+      fullText,
+      message: `⚠ O modelo anunciou ações mas não chamou nenhuma ferramenta — ${reason}. Reformule o pedido, troque o modelo, ou verifique se o skill atual permite tool use.`,
+    };
+  }
+
+  return { kind: 'done', fullText };
 }

@@ -1,5 +1,58 @@
+export interface AnnouncedToolIntent {
+  index: number;
+  phrase: string;
+}
+
+const ANNOUNCED_TOOL_INTENT_PHRASES = [
+  'vou verificar', 'vou checar', 'deixa eu ver', 'deixe-me verificar',
+  'vou executar', 'vou rodar', 'vou ler', 'vou listar',
+  'vou abrir', 'vou inspecionar',
+  'vou acessar', 'vou consultar', 'vou buscar',
+  'let me check', 'let me verify', 'let me run', 'let me read',
+  'let me look', 'let me see', 'let me open',
+  'i\'ll check', 'i\'ll run', 'i\'ll read', 'i\'ll look', 'i\'ll open',
+] as const;
+
+/** Finds the first positive announcement of a tool-oriented action. */
+export function findAnnouncedToolIntent(text: string): AnnouncedToolIntent | null {
+  return findAnnouncedToolIntents(text)[0] ?? null;
+}
+
+/**
+ * Finds an announced action that is still pending at the end of the response.
+ * A later sentence completes the announcement only when it contains something
+ * beyond waiting language or another deferred action.
+ */
+export function findDeferredToolIntent(text: string): AnnouncedToolIntent | null {
+  return findAnnouncedToolIntents(text).find(intent => {
+    const sentenceEnd = findSentenceEnd(text, intent.index);
+    return !containsCompletedFollowUp(text.slice(sentenceEnd));
+  }) ?? null;
+}
+
+function findAnnouncedToolIntents(text: string): AnnouncedToolIntent[] {
+  const lower = normalizeIntentText(text);
+  const matches: AnnouncedToolIntent[] = [];
+
+  for (const phrase of ANNOUNCED_TOOL_INTENT_PHRASES) {
+    let fromIndex = 0;
+    while (fromIndex < lower.length) {
+      const index = lower.indexOf(phrase, fromIndex);
+      if (index === -1) break;
+      const intent = { index, phrase };
+      const isPositiveMatch = hasPhraseBoundaries(lower, index, phrase)
+        && !isNegatedIntent(lower, index)
+        && !isCompletedDirectAnswer(lower, intent);
+      if (isPositiveMatch) matches.push(intent);
+      fromIndex = index + phrase.length;
+    }
+  }
+
+  return matches.sort((a, b) => a.index - b.index);
+}
+
 export function needsToolCalling(text: string): boolean {
-  const lower = text.toLowerCase();
+  const lower = normalizeIntentText(text);
 
   const refusalIndicators = [
     'não consigo acessar', 'não consigo executar', 'não consigo rodar',
@@ -26,15 +79,95 @@ export function needsToolCalling(text: string): boolean {
   ];
   if (shellPatterns.some(p => p.test(text))) return true;
 
-  const intentIndicators = [
-    'vou verificar', 'vou checar', 'deixa eu ver', 'deixe-me verificar',
-    'vou executar', 'vou rodar', 'vou ler o arquivo', 'vou listar',
-    'vou acessar', 'vou consultar', 'vou buscar',
-    'let me check', 'let me verify', 'let me run', 'let me read',
-    'let me look', 'let me see', 'i\'ll check', 'i\'ll run',
-    'i\'ll read', 'i\'ll look',
-  ];
-  if (intentIndicators.some(i => lower.includes(i))) return true;
+  if (findAnnouncedToolIntent(text)) return true;
 
   return false;
+}
+
+function isNegatedIntent(text: string, index: number): boolean {
+  const clauseStart = findClauseStart(text, index);
+  const prefix = text.slice(clauseStart, index);
+  const portugueseNegation = /(?:^|[^\p{L}])(?:não|nao|nunca|jamais|nem)(?=$|[^\p{L}])/u;
+  const englishNegation = /(?:^|[^\p{L}])(?:not|never|don't|dont|do not|won't|wont|will not|can't|cant|cannot)(?=$|[^\p{L}])/u;
+  return portugueseNegation.test(prefix) || englishNegation.test(prefix);
+}
+
+function findClauseStart(text: string, index: number): number {
+  let clauseStart = Math.max(
+    text.lastIndexOf('.', index - 1),
+    text.lastIndexOf('!', index - 1),
+    text.lastIndexOf('?', index - 1),
+    text.lastIndexOf(',', index - 1),
+    text.lastIndexOf(';', index - 1),
+    text.lastIndexOf(':', index - 1),
+    text.lastIndexOf('\n', index - 1),
+  ) + 1;
+
+  const coordinatingBoundary = /\b(?:but|yet|however|nevertheless|mas|porém|porem|contudo|todavia)\b|[—–]|\s-\s/gu;
+  for (const match of text.slice(0, index).matchAll(coordinatingBoundary)) {
+    clauseStart = Math.max(clauseStart, match.index + match[0].length);
+  }
+
+  return clauseStart;
+}
+
+function hasPhraseBoundaries(text: string, index: number, phrase: string): boolean {
+  const before = text[index - 1];
+  const after = text[index + phrase.length];
+  const isWord = (char: string | undefined) => char !== undefined && /[\p{L}\p{N}_]/u.test(char);
+  return !isWord(before) && !isWord(after);
+}
+
+function findSentenceEnd(text: string, index: number): number {
+  for (let i = index; i < text.length; i++) {
+    const char = text[i];
+    if (char === '\n') return i + 1;
+    if (char !== '.' && char !== '!' && char !== '?') continue;
+    const next = text[i + 1];
+    if (next === undefined || /\s/.test(next)) return i + 1;
+  }
+  return text.length;
+}
+
+function containsSubstantiveText(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
+}
+
+function containsCompletedFollowUp(text: string): boolean {
+  const clauses = text.split(/(?:[.!?](?=\s|$)|\n)+/u);
+  return clauses.some(containsAnswerEvidence);
+}
+
+function containsAnswerEvidence(text: string): boolean {
+  const normalized = normalizeIntentText(text).trim();
+  if (!containsSubstantiveText(normalized)) return false;
+
+  const answerWord = /^(?:yes|no|sim|não|nao|correct|incorrect|correto|incorreto|done|pronto)(?=$|[\s,.!?;:])/u;
+  const resultLead = /^(?:the (?:answer|result)|i found|we found|found|encontrei|encontramos|here(?:'s| is)|aqui est[aá]|i recommend|recomendo|use|utilize)(?=$|[^\p{L}])/u;
+  const labeledResult = /^(?:result|resultado|output|saída)\s*:/u;
+  const resultPredicate = /(?:^|[^\p{L}])(?:is|are|was|were|equals|contains|shows|returns|exists|has|have|é|são|era|eram|está|estão|equivale|contém|contem|mostra|retorna|existe|tem|possui)(?=$|[^\p{L}])/u;
+  const structuredResult = /^(?:```|[-*]\s+\S|\d+[.)]\s+\S)/u;
+  return answerWord.test(normalized)
+    || resultLead.test(normalized)
+    || labeledResult.test(normalized)
+    || resultPredicate.test(normalized)
+    || structuredResult.test(normalized)
+    || /[=≠]/u.test(normalized);
+}
+
+function isCompletedDirectAnswer(text: string, intent: AnnouncedToolIntent): boolean {
+  const sentenceEnd = findSentenceEnd(text, intent.index);
+  const suffix = text.slice(intent.index + intent.phrase.length, sentenceEnd);
+  const internalReasoning = /^\s*(?:mentally|conceptually|logically|in my head|without tools|mentalmente|conceitualmente|logicamente|de cabeça|sem ferramentas)\b/u;
+  if (internalReasoning.test(suffix)) return true;
+
+  const separator = /[:;,]|[—–]|\s-\s/u.exec(suffix);
+  if (!separator) return false;
+
+  const resultClause = suffix.slice(separator.index + separator[0].length).trim();
+  return containsAnswerEvidence(resultClause);
+}
+
+function normalizeIntentText(text: string): string {
+  return text.toLowerCase().replace(/[’‘ʼ]/gu, "'");
 }

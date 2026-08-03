@@ -28,6 +28,9 @@ export function createOrchestrationSink(
     done: (fullText) => emitter.emit('done', fullText),
     title: (title) => emitter.emit('title', title),
     subagentChunk: (taskId, label, text) => emitter.emit('subagent_chunk', taskId, label, text),
+    subagentClear: (taskId, label) => emitter.emit('subagent_clear', taskId, label),
+    subagentWarning: (taskId, label, message) =>
+      emitter.emit('subagent_warning', taskId, label, message),
     subagentStatus: (taskId, label, status, durationMs) =>
       emitter.emit('subagent_status', taskId, label, status, durationMs),
     progress: (progress) => emitter.emit('orchestration_progress', progress),

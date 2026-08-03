@@ -1,23 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ChatChunk, ToolCall } from '../src/providers/types.js';
+import type { ChatChunk, ChatMessage, ToolCall } from '../src/providers/types.js';
 import type { ModelPlan } from '../src/agent/model-selection.js';
 import type { IterationDeps, IterationEventSink, IterationState } from '../src/agent/iteration.js';
 import type { ContextHealth } from '../src/context/health.js';
 
 let chatScript: ChatChunk[] = [];
+let chatMessages: ChatMessage[][] = [];
 
 vi.mock('../src/providers/registry.js', () => ({
   getProvider: () => ({
     name: 'mock',
-    async *chat() {
+    async *chat(input: { messages: ChatMessage[] }) {
+      chatMessages.push(input.messages);
       for (const c of chatScript) yield c;
     },
   }),
 }));
 
 vi.mock('../src/agent/context.js', () => ({
-  buildContext: vi.fn(async () => ({
-    messages: [],
+  buildContext: vi.fn(async (
+    _sessionId: string,
+    _model: string,
+    options?: { transientSystemContent?: string; transientAssistantContent?: string },
+  ) => ({
+    messages: [
+      ...(options?.transientSystemContent
+        ? [{ role: 'system' as const, content: options.transientSystemContent }]
+        : []),
+      ...(options?.transientAssistantContent
+        ? [{ role: 'assistant' as const, content: options.transientAssistantContent }]
+        : []),
+    ],
     budget: { total: 8000, system: 0, reserved: 0, available: 8000 },
     health: { level: 'ok', usedTokens: 0, totalTokens: 8000, pctUsed: 0 } as ContextHealth,
   })),
@@ -126,6 +139,7 @@ function makeDeps(override: Partial<IterationDeps> = {}): IterationDeps & { sink
     planMode: false,
     temperament: 'neutral',
     maxIterations: 5,
+    skillExpectsTools: true,
     signal: undefined,
     approvedAllRef: { current: false },
     requestApproval: vi.fn(async () => 'approve'),
@@ -135,10 +149,17 @@ function makeDeps(override: Partial<IterationDeps> = {}): IterationDeps & { sink
   return Object.assign(deps, { sink });
 }
 
-const initial: IterationState = { iteration: 0, switchedToCloud: false, lastHadToolCalls: false, retryCount: 0 };
+const initial: IterationState = {
+  iteration: 0,
+  switchedToCloud: false,
+  lastHadToolCalls: false,
+  retryCount: 0,
+  intentNudgeUsed: false,
+};
 
 beforeEach(() => {
   chatScript = [];
+  chatMessages = [];
   vi.mocked(evaluateToolCall).mockReset().mockResolvedValue({ kind: 'allowed' });
   vi.mocked(runToolCall).mockReset().mockImplementation(async ({ toolName }) => ({
     toolName,
@@ -205,6 +226,28 @@ describe('runOneIteration / done', () => {
 
     expect(outcome).toEqual({ kind: 'done', fullText: 'hello world' });
     expect(deps.sink.events.find(e => e[0] === 'usage')).toBeDefined();
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'hello world', undefined, undefined, undefined, 'claude-sonnet',
+    );
+  });
+
+  it('adds transient recovery content only to the current model request', async () => {
+    chatScript = [{ type: 'text', text: 'recovered' }, { type: 'done' }];
+
+    await runOneIteration(
+      makeDeps({
+        transientSystemContent: '[intent-without-action] act now',
+        transientAssistantContent: 'I will check the file.',
+      }),
+      initial,
+    );
+    await runOneIteration(makeDeps(), initial);
+
+    expect(chatMessages[0]).toEqual([
+      { role: 'system', content: '[intent-without-action] act now' },
+      { role: 'assistant', content: 'I will check the file.' },
+    ]);
+    expect(chatMessages[1]).toEqual([]);
   });
 });
 
@@ -237,6 +280,21 @@ describe('runOneIteration / tool-pick routing', () => {
       ['s1', 'assistant', 'draft answer', undefined, undefined, undefined, 'big'],
     );
   });
+
+  it('applies intent recovery to the routed synthesis response', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou inspecionar os arquivos agora.' },
+      { type: 'done' },
+    ];
+    const deps = makeDeps({ plan: routingPlan });
+
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('nudge-intent');
+    if (outcome.kind !== 'nudge-intent') throw new Error('unreachable');
+    expect(outcome.state.intentNudgeUsed).toBe(true);
+    expect(vi.mocked(addMessage)).not.toHaveBeenCalled();
+  });
 });
 
 describe('runOneIteration / error', () => {
@@ -256,7 +314,25 @@ describe('runOneIteration / error', () => {
     const outcome = await runOneIteration(deps, { ...initial, lastHadToolCalls: true });
 
     expect(outcome.kind).toBe('continue');
-    if (outcome.kind === 'continue') expect(outcome.state.retryCount).toBe(1);
+    if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('internal-retry');
+      expect(outcome.state.retryCount).toBe(1);
+    }
+  });
+
+  it('marks an empty response after tool calls as an internal retry', async () => {
+    chatScript = [{ type: 'done' }];
+
+    const outcome = await runOneIteration(
+      makeDeps(),
+      { ...initial, lastHadToolCalls: true },
+    );
+
+    expect(outcome.kind).toBe('continue');
+    if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('internal-retry');
+      expect(outcome.state.retryCount).toBe(1);
+    }
   });
 });
 
@@ -271,6 +347,7 @@ describe('runOneIteration / continue after tool calls', () => {
 
     expect(outcome.kind).toBe('continue');
     if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('tool-calls');
       expect(outcome.state.lastHadToolCalls).toBe(true);
       expect(outcome.state.iteration).toBe(1);
       expect(outcome.state.retryCount).toBe(0);
@@ -338,6 +415,180 @@ describe('runOneIteration / diagnostics', () => {
   });
 });
 
+describe('runOneIteration / intent-without-action', () => {
+  it('returns nudge-intent when the model announces an action but emits no tool call', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json para entender as dependências.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps();
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('nudge-intent');
+    if (outcome.kind !== 'nudge-intent') throw new Error('unreachable');
+    expect(outcome.fullText).toContain('Vou ler o package.json');
+    expect(outcome.state.intentNudgeUsed).toBe(true);
+    expect(vi.mocked(addMessage)).not.toHaveBeenCalled();
+  });
+
+  it('returns nudge-intent when the announcement is followed only by waiting text', async () => {
+    chatScript = [
+      { type: 'text', text: 'Let me check the file. One moment please.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('nudge-intent');
+    expect(vi.mocked(addMessage)).not.toHaveBeenCalled();
+  });
+
+  it('returns done-with-warning when intent persists after the nudge has been used', async () => {
+    chatScript = [
+      { type: 'text', text: 'Agora vou rodar os testes pra ver se passam.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps();
+    const stateAfterNudge: IterationState = { ...initial, intentNudgeUsed: true };
+    const outcome = await runOneIteration(deps, stateAfterNudge);
+
+    expect(outcome.kind).toBe('done-with-warning');
+    if (outcome.kind !== 'done-with-warning') throw new Error('unreachable');
+    expect(outcome.message).toMatch(/⚠/);
+    expect(outcome.message).toMatch(/anunciou ações/);
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'Agora vou rodar os testes pra ver se passam.',
+      undefined, undefined, undefined, 'claude-sonnet',
+    );
+  });
+
+  it('persists only the recovered answer after discarding the tentative draft', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json agora.' },
+      { type: 'done' },
+    ];
+
+    const first = await runOneIteration(makeDeps(), initial);
+    expect(first.kind).toBe('nudge-intent');
+    if (first.kind !== 'nudge-intent') throw new Error('unreachable');
+
+    chatScript = [{ type: 'text', text: 'O package usa Vitest.' }, { type: 'done' }];
+    const recovered = await runOneIteration(makeDeps({
+      transientSystemContent: '[intent-without-action] act now',
+      transientAssistantContent: first.fullText,
+    }), first.state);
+
+    expect(recovered).toEqual({ kind: 'done', fullText: 'O package usa Vitest.' });
+    expect(vi.mocked(addMessage)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'O package usa Vitest.',
+      undefined, undefined, undefined, 'claude-sonnet',
+    );
+  });
+
+  it('persists only the terminal draft when recovery ends with a warning', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json agora.' },
+      { type: 'done' },
+    ];
+
+    const first = await runOneIteration(makeDeps(), initial);
+    expect(first.kind).toBe('nudge-intent');
+    if (first.kind !== 'nudge-intent') throw new Error('unreachable');
+
+    chatScript = [
+      { type: 'text', text: 'Ainda vou verificar o package.json.' },
+      { type: 'done' },
+    ];
+    const failed = await runOneIteration(makeDeps({
+      transientSystemContent: '[intent-without-action] act now',
+      transientAssistantContent: first.fullText,
+    }), first.state);
+
+    expect(failed.kind).toBe('done-with-warning');
+    expect(vi.mocked(addMessage)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1', 'assistant', 'Ainda vou verificar o package.json.',
+      undefined, undefined, undefined, 'claude-sonnet',
+    );
+  });
+
+  it('stays silent (done) when the active skill opts out via skillExpectsTools=false', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o repositório e te mostrar.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps({ skillExpectsTools: false });
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('stays silent (done) when the assistant text has no tool-flavored intent', async () => {
+    chatScript = [
+      { type: 'text', text: 'Aqui está um resumo do que entendi do seu pedido.' },
+      { type: 'done' },
+    ];
+
+    const deps = makeDeps();
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('does not discard a substantive answer that follows an intent-like phrase', async () => {
+    chatScript = [
+      {
+        type: 'text',
+        text: 'Vou verificar as duas opções. A primeira é mais segura; recomendo usá-la.',
+      },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('does not nudge valid shell instructions or refusal explanations', async () => {
+    chatScript = [
+      { type: 'text', text: 'Use este comando:\n```bash\nnpm test\n```\nNão consigo prever o resultado sem executá-lo.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('does not nudge a negated announcement', async () => {
+    chatScript = [
+      { type: 'text', text: 'Não vou rodar os testes porque você pediu apenas o comando.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('warns instead of nudging when the iteration budget is exhausted', async () => {
+    chatScript = [
+      { type: 'text', text: 'Vou ler o package.json agora.' },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps({ maxIterations: 1 }), initial);
+
+    expect(outcome.kind).toBe('done-with-warning');
+    if (outcome.kind !== 'done-with-warning') throw new Error('unreachable');
+    expect(outcome.message).toMatch(/limite de iterações/);
+  });
+});
+
 describe('runOneIteration / switch to cloud on refusal', () => {
   it('switches to cloud when local model refuses without tools (useLocalFirst)', async () => {
     chatScript = [
@@ -350,6 +601,7 @@ describe('runOneIteration / switch to cloud on refusal', () => {
 
     expect(outcome.kind).toBe('continue');
     if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('model-switch');
       expect(outcome.state.switchedToCloud).toBe(true);
     }
     expect(deps.sink.events.some(e => e[0] === 'model_switch' && e[1] === 'qwen2.5-coder')).toBe(true);

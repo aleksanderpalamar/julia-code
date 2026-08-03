@@ -46,7 +46,7 @@ export type ObservabilityEvent =
       ts: string;
       sessionId: string;
       iteration: number;
-      kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction';
+      kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction' | 'intent-nudge';
     }
   | {
       type: 'diagnostics';
@@ -148,7 +148,7 @@ export const log = {
   retry(args: {
     sessionId: string;
     iteration: number;
-    kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction';
+    kind: 'stream' | 'empty' | 'deterministic' | 'tool-correction' | 'intent-nudge';
   }): void {
     fire({ type: 'retry', ts: now(), ...args });
   },

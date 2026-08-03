@@ -186,6 +186,8 @@ function makeSink(override: Partial<OrchestrationEventSink> = {}): Orchestration
     done: () => {},
     title: () => {},
     subagentChunk: () => {},
+    subagentClear: () => {},
+    subagentWarning: () => {},
     subagentStatus: () => {},
     progress: () => {},
     ...override,

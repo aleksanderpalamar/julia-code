@@ -6,7 +6,7 @@ import { getProjectDir } from '../config/workspace.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { computeBudget, type ContextBudget } from '../context/budget.js';
-import { estimateDbMessageTokens } from '../context/token-counter.js';
+import { estimateDbMessageTokens, estimateMessagesTokens } from '../context/token-counter.js';
 import { extractTaskAnchor, formatTaskAnchor } from '../context/task-anchor.js';
 import { selectMessagesForRetention } from '../context/message-scorer.js';
 import { deserializeCompaction, formatCompactionForContext } from '../context/compaction.js';
@@ -20,6 +20,8 @@ interface BuildContextOptions {
   iteration?: number;
   maxIterations?: number;
   extraSystemContent?: string;
+  transientSystemContent?: string;
+  transientAssistantContent?: string;
 }
 
 interface BuildContextResult {
@@ -27,6 +29,10 @@ interface BuildContextResult {
   budget: ContextBudget;
   health: ReturnType<typeof assessHealth>;
 }
+
+const MAX_TRANSIENT_ASSISTANT_TOKENS = 512;
+const TRANSIENT_ASSISTANT_HISTORY_SHARE = 0.25;
+const TRUNCATED_DRAFT_PREFIX = '[... earlier draft truncated ...]\n';
 
 export async function buildContext(
   sessionId: string,
@@ -41,6 +47,14 @@ export async function buildContext(
   }
 
   const budget = await computeBudget(model, systemContent);
+  const transientAssistantMessage = buildTransientAssistantMessage(
+    options?.transientAssistantContent,
+    budget.recentMessages,
+  );
+  const transientAssistantTokens = transientAssistantMessage
+    ? estimateMessagesTokens([transientAssistantMessage])
+    : 0;
+  const recentMessagesBudget = Math.max(0, budget.recentMessages - transientAssistantTokens);
 
   const compaction = getLatestCompaction(sessionId);
   let taskAnchorText: string | null = null;
@@ -101,7 +115,7 @@ export async function buildContext(
     });
 
     const recentDbMessages = getMessages(sessionId, compaction.messages_end);
-    const retained = selectMessagesForRetention(recentDbMessages, budget.recentMessages);
+    const retained = selectMessagesForRetention(recentDbMessages, recentMessagesBudget);
 
     for (const msg of retained.toKeep) {
       messages.push(dbMessageToChatMessage(msg));
@@ -114,8 +128,8 @@ export async function buildContext(
         0,
       );
 
-      if (totalDbTokens > budget.recentMessages) {
-        const retained = selectMessagesForRetention(allDbMessages, budget.recentMessages);
+      if (totalDbTokens > recentMessagesBudget) {
+        const retained = selectMessagesForRetention(allDbMessages, recentMessagesBudget);
         for (const msg of retained.toKeep) {
           messages.push(dbMessageToChatMessage(msg));
         }
@@ -127,6 +141,12 @@ export async function buildContext(
     }
   }
 
+  // Recovery drafts are untrusted model output. Keep them in their original
+  // assistant role and only in the iteration that explicitly supplied them.
+  if (transientAssistantMessage) {
+    messages.push(transientAssistantMessage);
+  }
+
   const health = assessHealth(messages, budget);
 
   const warning = getContextWarningMessage(health);
@@ -135,6 +155,42 @@ export async function buildContext(
   }
 
   return { messages, budget, health };
+}
+
+function buildTransientAssistantMessage(
+  content: string | undefined,
+  recentMessagesBudget: number,
+): ChatMessage | undefined {
+  if (!content) return undefined;
+
+  const tokenCap = Math.min(
+    MAX_TRANSIENT_ASSISTANT_TOKENS,
+    Math.floor(recentMessagesBudget * TRANSIENT_ASSISTANT_HISTORY_SHARE),
+  );
+  if (tokenCap <= estimateMessagesTokens([{ role: 'assistant', content: '' }])) return undefined;
+
+  const fullMessage: ChatMessage = { role: 'assistant', content };
+  if (estimateMessagesTokens([fullMessage]) <= tokenCap) return fullMessage;
+
+  const fits = (tailLength: number): boolean => estimateMessagesTokens([{
+    role: 'assistant',
+    content: TRUNCATED_DRAFT_PREFIX + (tailLength === 0 ? '' : content.slice(-tailLength)),
+  }]) <= tokenCap;
+
+  if (!fits(0)) return undefined;
+
+  let low = 0;
+  let high = content.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fits(middle)) low = middle;
+    else high = middle - 1;
+  }
+
+  return {
+    role: 'assistant',
+    content: TRUNCATED_DRAFT_PREFIX + (low === 0 ? '' : content.slice(-low)),
+  };
 }
 
 export async function getCompactableMessages(
@@ -252,9 +308,14 @@ function buildSystemPrompt(options?: BuildContextOptions): string {
     ? '\n\n---\n\n## Skill Ativada\n\n' + options.extraSystemContent
     : '';
 
+  const transientSection = options?.transientSystemContent
+    ? '\n\n---\n\n## Instrução transitória da iteração\n\n' + options.transientSystemContent
+    : '';
+
   return skills.map(s => s.content).join('\n\n---\n\n')
     + (temperamentSkill ? '\n\n---\n\n' + temperamentSkill.content : '')
     + (skillSection ? skillSection : '')
+    + transientSection
     + '\n\n---\n\n' + envInfo
     + (planModeSection ? '\n\n---\n\n' + planModeSection : '')
     + (iterationSection ? '\n\n---\n\n' + iterationSection : '')

@@ -55,7 +55,14 @@ class FakeManager extends EventEmitter {
   }
 
   listenerCountsAllZero(): boolean {
-    for (const event of ["task:chunk", "task:started", "task:completed", "task:failed"]) {
+    for (const event of [
+      "task:chunk",
+      "task:clear",
+      "task:warning",
+      "task:started",
+      "task:completed",
+      "task:failed",
+    ]) {
       if (this.listenerCount(event) !== 0) return false;
     }
     return true;
@@ -74,16 +81,35 @@ import type { OrchestrationEventSink, PlannedSubtask } from "../src/agent/orches
 interface Capture {
   chunks: string[];
   subagentChunks: Array<{ taskId: string; label: string; text: string }>;
+  subagentClears: Array<{ taskId: string; label: string }>;
+  subagentWarnings: Array<{ taskId: string; label: string; message: string }>;
   statuses: Array<{ taskId: string; status: string; durationMs?: number }>;
   progress: Array<{ completed: number; failed: number; running: number; queued: number }>;
 }
 
-function makeEmit(): { emit: Pick<OrchestrationEventSink, "chunk" | "subagentChunk" | "subagentStatus" | "progress">; capture: Capture } {
-  const capture: Capture = { chunks: [], subagentChunks: [], statuses: [], progress: [] };
+function makeEmit(): {
+  emit: Pick<
+    OrchestrationEventSink,
+    "chunk" | "subagentChunk" | "subagentClear" | "subagentWarning" | "subagentStatus" | "progress"
+  >;
+  capture: Capture;
+} {
+  const capture: Capture = {
+    chunks: [],
+    subagentChunks: [],
+    subagentClears: [],
+    subagentWarnings: [],
+    statuses: [],
+    progress: [],
+  };
   const emit = {
     chunk: (text: string) => capture.chunks.push(text),
     subagentChunk: (taskId: string, label: string, text: string) =>
       capture.subagentChunks.push({ taskId, label, text }),
+    subagentClear: (taskId: string, label: string) =>
+      capture.subagentClears.push({ taskId, label }),
+    subagentWarning: (taskId: string, label: string, message: string) =>
+      capture.subagentWarnings.push({ taskId, label, message }),
     subagentStatus: (taskId: string, _label: string, status: string, durationMs?: number) =>
       capture.statuses.push({ taskId, status, durationMs }),
     progress: (p: { completed: number; failed: number; running: number; queued: number }) =>
@@ -117,23 +143,31 @@ describe("executeSubagents", () => {
 
     const [id1, id2] = ["t-1", "t-2"];
     fakeManager.emit("task:chunk", id1, "hello");
+    fakeManager.emit("task:clear", id1);
+    fakeManager.emit("task:warning", id1, "recovery warning");
     fakeManager.transition(id1, "running");
     fakeManager.transition(id2, "running");
-    fakeManager.transition(id1, "completed", { result: "ok A", durationMs: 10 });
+    fakeManager.transition(id1, "failed", { error: "recovery warning", durationMs: 10 });
     fakeManager.transition(id2, "completed", { result: "ok B", durationMs: 20 });
 
     const result = await resultPromise;
 
     expect(fakeManager.prewarmCalls).toEqual([2]);
-    expect(result.completed).toBe(2);
-    expect(result.failed).toBe(0);
-    expect(result.allDone).toBe(true);
-    expect(result.resultLines[0]).toContain("ok A");
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.allDone).toBe(false);
+    expect(result.resultLines[0]).toContain("❌ Failed: recovery warning");
     expect(result.resultLines[1]).toContain("ok B");
     expect(capture.subagentChunks).toEqual([
       { taskId: id1, label: "first subtask does A", text: "hello" },
     ]);
-    expect(capture.statuses.find(s => s.taskId === id1 && s.status === "completed")?.durationMs).toBe(10);
+    expect(capture.subagentClears).toEqual([
+      { taskId: id1, label: "first subtask does A" },
+    ]);
+    expect(capture.subagentWarnings).toEqual([
+      { taskId: id1, label: "first subtask does A", message: "recovery warning" },
+    ]);
+    expect(capture.statuses.find(s => s.taskId === id1 && s.status === "failed")?.durationMs).toBe(10);
     expect(capture.progress.length).toBeGreaterThan(0);
     expect(fakeManager.listenerCountsAllZero()).toBe(true);
   });
@@ -222,6 +256,8 @@ describe("executeSubagents", () => {
     await new Promise(r => setImmediate(r));
 
     fakeManager.emit("task:chunk", "foreign-task", "ghost text");
+    fakeManager.emit("task:clear", "foreign-task");
+    fakeManager.emit("task:warning", "foreign-task", "ghost warning");
     fakeManager.emit("task:started", "foreign-task");
 
     fakeManager.transition("t-1", "completed", { result: "ok" });
@@ -229,6 +265,8 @@ describe("executeSubagents", () => {
     await resultPromise;
 
     expect(capture.subagentChunks.find(c => c.taskId === "foreign-task")).toBeUndefined();
+    expect(capture.subagentClears.find(c => c.taskId === "foreign-task")).toBeUndefined();
+    expect(capture.subagentWarnings.find(c => c.taskId === "foreign-task")).toBeUndefined();
     expect(capture.statuses.find(s => s.taskId === "foreign-task")).toBeUndefined();
   });
 

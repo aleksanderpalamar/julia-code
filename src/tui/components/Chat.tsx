@@ -4,7 +4,7 @@ import { Markdown } from './Markdown.js';
 import { ToolOutput } from './ToolOutput.js';
 
 export interface ChatEntry {
-  type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'system' | 'btw' | 'subagent_stream';
+  type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'warning' | 'system' | 'btw' | 'subagent_stream';
   content: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
@@ -46,6 +46,7 @@ const entryRenderers: Record<ChatEntry['type'], (e: ChatEntry) => React.ReactEle
     />
   ),
   error: (e) => <Text color="red">Error: {e.content}</Text>,
+  warning: (e) => <Text color="yellow">{e.content}</Text>,
   subagent_stream: (e) => (
     <Box flexDirection="column">
       <Text color="cyan" dimColor bold>[{e.subagentLabel ?? 'subagent'}]</Text>
