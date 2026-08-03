@@ -147,16 +147,16 @@ describe("executeSubagents", () => {
     fakeManager.emit("task:warning", id1, "recovery warning");
     fakeManager.transition(id1, "running");
     fakeManager.transition(id2, "running");
-    fakeManager.transition(id1, "completed", { result: "ok A", durationMs: 10 });
+    fakeManager.transition(id1, "failed", { error: "recovery warning", durationMs: 10 });
     fakeManager.transition(id2, "completed", { result: "ok B", durationMs: 20 });
 
     const result = await resultPromise;
 
     expect(fakeManager.prewarmCalls).toEqual([2]);
-    expect(result.completed).toBe(2);
-    expect(result.failed).toBe(0);
-    expect(result.allDone).toBe(true);
-    expect(result.resultLines[0]).toContain("ok A");
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.allDone).toBe(false);
+    expect(result.resultLines[0]).toContain("❌ Failed: recovery warning");
     expect(result.resultLines[1]).toContain("ok B");
     expect(capture.subagentChunks).toEqual([
       { taskId: id1, label: "first subtask does A", text: "hello" },
@@ -167,7 +167,7 @@ describe("executeSubagents", () => {
     expect(capture.subagentWarnings).toEqual([
       { taskId: id1, label: "first subtask does A", message: "recovery warning" },
     ]);
-    expect(capture.statuses.find(s => s.taskId === id1 && s.status === "completed")?.durationMs).toBe(10);
+    expect(capture.statuses.find(s => s.taskId === id1 && s.status === "failed")?.durationMs).toBe(10);
     expect(capture.progress.length).toBeGreaterThan(0);
     expect(fakeManager.listenerCountsAllZero()).toBe(true);
   });

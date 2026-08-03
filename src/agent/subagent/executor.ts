@@ -95,6 +95,7 @@ export function runTask(deps: RunTaskDeps): void {
   const isolation = setupIsolation(task.id);
 
   let resultText = '';
+  let terminalWarning: string | undefined;
 
   agent.on('chunk', (text) => {
     resultText += text;
@@ -107,11 +108,26 @@ export function runTask(deps: RunTaskDeps): void {
   });
 
   agent.on('warning', (message) => {
+    terminalWarning = message;
     emitter.emit('task:warning', task.id, message);
   });
 
   agent.on('done', async (fullText) => {
     if (task.status === 'completed' || task.status === 'failed') return;
+    if (terminalWarning) {
+      teardownWorktree(isolation.worktree);
+      finalizeTask({
+        task,
+        modelKey,
+        agents,
+        concurrency,
+        emitter,
+        drainQueue,
+        status: 'failed',
+        error: terminalWarning,
+      });
+      return;
+    }
     const mergeInfo = await finalizeWorktree(isolation.worktree);
     const result = (fullText || resultText) + mergeInfo;
     finalizeTask({

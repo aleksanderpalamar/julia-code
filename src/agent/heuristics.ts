@@ -135,16 +135,24 @@ function containsSubstantiveText(text: string): boolean {
 
 function containsCompletedFollowUp(text: string): boolean {
   const clauses = text.split(/(?:[.!?](?=\s|$)|\n)+/u);
-  return clauses.some(clause => containsSubstantiveText(clause) && !isDeferredFollowUp(clause));
+  return clauses.some(containsAnswerEvidence);
 }
 
-function isDeferredFollowUp(text: string): boolean {
-  if (findAnnouncedToolIntent(text)) return true;
-
+function containsAnswerEvidence(text: string): boolean {
   const normalized = normalizeIntentText(text).trim();
-  const englishDeferral = /^(?:one moment(?: please)?|just (?:a|one) moment(?: please)?|please wait|wait (?:a|one) moment|hold on|give me (?:a|one) moment|i(?:'m| am) (?:checking|looking|working on it)|i(?:'ll| will) (?:get back|return|report back)|thanks? for (?:your )?patience)\b/u;
-  const portugueseDeferral = /^(?:um momento(?: por favor)?|s[oó] um momento(?: por favor)?|por favor aguarde|aguarde|espere (?:um|s[oó] um) momento|estou (?:verificando|checando|consultando|buscando|trabalhando nisso)|j[aá] volto|retorno em seguida|vou retornar|obrigad[oa] pela paci[eê]ncia)\b/u;
-  return englishDeferral.test(normalized) || portugueseDeferral.test(normalized);
+  if (!containsSubstantiveText(normalized)) return false;
+
+  const answerWord = /^(?:yes|no|sim|não|nao|correct|incorrect|correto|incorreto|done|pronto)(?=$|[\s,.!?;:])/u;
+  const resultLead = /^(?:the (?:answer|result)|i found|we found|found|encontrei|encontramos|here(?:'s| is)|aqui est[aá]|i recommend|recomendo|use|utilize)(?=$|[^\p{L}])/u;
+  const labeledResult = /^(?:result|resultado|output|saída)\s*:/u;
+  const resultPredicate = /(?:^|[^\p{L}])(?:is|are|was|were|equals|contains|shows|returns|exists|has|have|é|são|era|eram|está|estão|equivale|contém|contem|mostra|retorna|existe|tem|possui)(?=$|[^\p{L}])/u;
+  const structuredResult = /^(?:```|[-*]\s+\S|\d+[.)]\s+\S)/u;
+  return answerWord.test(normalized)
+    || resultLead.test(normalized)
+    || labeledResult.test(normalized)
+    || resultPredicate.test(normalized)
+    || structuredResult.test(normalized)
+    || /[=≠]/u.test(normalized);
 }
 
 function isCompletedDirectAnswer(text: string, intent: AnnouncedToolIntent): boolean {
@@ -157,13 +165,7 @@ function isCompletedDirectAnswer(text: string, intent: AnnouncedToolIntent): boo
   if (!separator) return false;
 
   const resultClause = suffix.slice(separator.index + separator[0].length).trim();
-  if (!containsSubstantiveText(resultClause)) return false;
-
-  const answerWord = /^(?:yes|no|sim|não|nao|correct|incorrect|correto|incorreto|done|pronto)(?=$|[\s,.!?;:])/u;
-  const resultPredicate = /(?:^|[^\p{L}])(?:is|are|was|were|equals|contains|shows|returns|exists|has|have|é|são|era|eram|está|estão|equivale|contém|contem|mostra|retorna|existe|tem|possui)(?=$|[^\p{L}])/u;
-  return answerWord.test(resultClause)
-    || resultPredicate.test(resultClause)
-    || /[=≠]/u.test(resultClause);
+  return containsAnswerEvidence(resultClause);
 }
 
 function normalizeIntentText(text: string): string {

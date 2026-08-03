@@ -57,8 +57,10 @@ export interface IterationState {
   intentNudgeUsed: boolean;
 }
 
+export type IterationContinuationReason = 'internal-retry' | 'model-switch' | 'tool-calls';
+
 export type IterationOutcome =
-  | { kind: 'continue'; state: IterationState }
+  | { kind: 'continue'; state: IterationState; reason: IterationContinuationReason }
   | { kind: 'done'; fullText: string }
   | { kind: 'nudge-intent'; fullText: string; state: IterationState }
   | { kind: 'done-with-warning'; fullText: string; message: string }
@@ -122,6 +124,7 @@ export async function runOneIteration(
     retryCount++;
     return {
       kind: 'continue',
+      reason: 'internal-retry',
       state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
     };
   }
@@ -139,6 +142,7 @@ export async function runOneIteration(
     emit.modelSwitch(decision.newModel);
     return {
       kind: 'continue',
+      reason: 'model-switch',
       state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
     };
   }
@@ -148,6 +152,7 @@ export async function runOneIteration(
     log.retry({ sessionId, iteration, kind: 'empty' });
     return {
       kind: 'continue',
+      reason: 'internal-retry',
       state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
     };
   }
@@ -203,6 +208,7 @@ export async function runOneIteration(
   lastHadToolCalls = true;
   return {
     kind: 'continue',
+    reason: 'tool-calls',
     state: { iteration, switchedToCloud, lastHadToolCalls, retryCount, intentNudgeUsed },
   };
 }

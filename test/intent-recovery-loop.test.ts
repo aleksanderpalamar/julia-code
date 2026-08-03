@@ -205,4 +205,58 @@ describe('AgentLoop / intent recovery lifecycle', () => {
     expect(mocks.runOneIteration.mock.calls[2][0].transientAssistantContent).toBeUndefined();
     expect(mocks.addMessage.mock.calls.filter(call => call[1] === 'system')).toHaveLength(0);
   });
+
+  it('preserves recovery context across an internal retry and then expires it', async () => {
+    mocks.runOneIteration
+      .mockResolvedValueOnce({
+        kind: 'nudge-intent',
+        fullText: 'Vou ler o package.json agora.',
+        state: stateAfterNudge,
+      })
+      .mockResolvedValueOnce({
+        kind: 'continue',
+        reason: 'internal-retry',
+        state: { ...stateAfterNudge, iteration: 2, retryCount: 1 },
+      })
+      .mockResolvedValueOnce({ kind: 'done', fullText: 'package loaded' })
+      .mockResolvedValueOnce({ kind: 'done', fullText: 'later answer' });
+
+    const agent = new AgentLoop();
+    await agent.run('retry-session', 'inspect the project');
+    await new AgentLoop().run('retry-session', 'explain the result');
+
+    for (const callIndex of [1, 2]) {
+      expect(mocks.runOneIteration.mock.calls[callIndex][0].transientSystemContent).toContain(
+        '[intent-without-action]',
+      );
+      expect(mocks.runOneIteration.mock.calls[callIndex][0].transientAssistantContent).toBe(
+        'Vou ler o package.json agora.',
+      );
+    }
+    expect(mocks.runOneIteration.mock.calls[3][0].transientSystemContent).toBeUndefined();
+    expect(mocks.runOneIteration.mock.calls[3][0].transientAssistantContent).toBeUndefined();
+  });
+
+  it('expires recovery context after a tool-call continuation', async () => {
+    mocks.runOneIteration
+      .mockResolvedValueOnce({
+        kind: 'nudge-intent',
+        fullText: 'Vou ler o package.json agora.',
+        state: stateAfterNudge,
+      })
+      .mockResolvedValueOnce({
+        kind: 'continue',
+        reason: 'tool-calls',
+        state: { ...stateAfterNudge, iteration: 2, lastHadToolCalls: true },
+      })
+      .mockResolvedValueOnce({ kind: 'done', fullText: 'package loaded' });
+
+    await new AgentLoop().run('tool-session', 'inspect the project');
+
+    expect(mocks.runOneIteration.mock.calls[1][0].transientSystemContent).toContain(
+      '[intent-without-action]',
+    );
+    expect(mocks.runOneIteration.mock.calls[2][0].transientSystemContent).toBeUndefined();
+    expect(mocks.runOneIteration.mock.calls[2][0].transientAssistantContent).toBeUndefined();
+  });
 });

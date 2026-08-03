@@ -202,14 +202,19 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         const iterationDeps = transientSystemContent || transientAssistantContent
           ? { ...deps, transientSystemContent, transientAssistantContent }
           : deps;
-        transientSystemContent = undefined;
-        transientAssistantContent = undefined;
         const outcome = await runOneIteration(iterationDeps, state);
 
         if (outcome.kind === 'continue') {
+          if (outcome.reason === 'tool-calls') {
+            transientSystemContent = undefined;
+            transientAssistantContent = undefined;
+          }
           state = outcome.state;
           continue;
         }
+
+        transientSystemContent = undefined;
+        transientAssistantContent = undefined;
 
         if (outcome.kind === 'nudge-intent') {
           this.emit('clear_streaming');

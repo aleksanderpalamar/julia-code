@@ -164,6 +164,21 @@ describe('findDeferredToolIntent', () => {
     });
   });
 
+  it('keeps an announcement pending when follow-up text is generic filler', () => {
+    expect(findDeferredToolIntent('Let me check the file. Okay.')).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+    expect(findDeferredToolIntent('Vou verificar o arquivo. Certo.')).toEqual({
+      index: 0,
+      phrase: 'vou verificar',
+    });
+    expect(findDeferredToolIntent('Let me check the file. 2026.')).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+  });
+
   it('keeps an announcement pending when the follow-up is another deferred action', () => {
     expect(findDeferredToolIntent("Let me check the file. I'll open it now.")).toEqual({
       index: 0,
@@ -178,6 +193,9 @@ describe('findDeferredToolIntent', () => {
   it('accepts an actual result even when it follows waiting language', () => {
     expect(findDeferredToolIntent(
       'Let me check the file. One moment please. It contains two entries.',
+    )).toBeNull();
+    expect(findDeferredToolIntent(
+      'Vou verificar o arquivo. Um momento. O resultado é válido.',
     )).toBeNull();
   });
 

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   agent: undefined as EventEmitter | undefined,
   updateStatus: vi.fn(),
   finalizeWorktree: vi.fn(),
+  teardownWorktree: vi.fn(),
 }));
 
 vi.mock('../src/agent/loop.js', async () => {
@@ -41,7 +42,7 @@ vi.mock('../src/observability/logger.js', () => ({
 vi.mock('../src/agent/subagent/isolation.js', () => ({
   setupIsolation: () => ({ worktree: null, toolContext: {} }),
   finalizeWorktree: mocks.finalizeWorktree,
-  teardownWorktree: vi.fn(),
+  teardownWorktree: mocks.teardownWorktree,
 }));
 
 import { runTask } from '../src/agent/subagent/executor.js';
@@ -53,7 +54,7 @@ describe('subagent recovery propagation', () => {
     mocks.finalizeWorktree.mockResolvedValue('');
   });
 
-  it('clears tentative output and forwards task-scoped warnings', async () => {
+  it('clears tentative output and fails a task after a terminal recovery warning', async () => {
     const task: SubagentTask = {
       id: 'task-1',
       runId: 'run-1',
@@ -68,7 +69,7 @@ describe('subagent recovery propagation', () => {
     emitter.on('task:chunk', (...args) => events.push(['chunk', ...args]));
     emitter.on('task:clear', (...args) => events.push(['clear', ...args]));
     emitter.on('task:warning', (...args) => events.push(['warning', ...args]));
-    emitter.on('task:completed', (...args) => events.push(['completed', ...args]));
+    emitter.on('task:failed', (...args) => events.push(['failed', ...args]));
 
     runTask({
       task,
@@ -95,8 +96,12 @@ describe('subagent recovery propagation', () => {
       ['clear', 'task-1'],
       ['chunk', 'task-1', 'recovered result'],
       ['warning', 'task-1', 'recovery warning'],
-      ['completed', 'task-1', 'recovered result'],
+      ['failed', 'task-1', 'recovery warning'],
     ]);
-    expect(task.result).toBe('recovered result');
+    expect(task.status).toBe('failed');
+    expect(task.error).toBe('recovery warning');
+    expect(task.result).toBeUndefined();
+    expect(mocks.finalizeWorktree).not.toHaveBeenCalled();
+    expect(mocks.teardownWorktree).toHaveBeenCalledWith(null);
   });
 });

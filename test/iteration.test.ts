@@ -314,7 +314,25 @@ describe('runOneIteration / error', () => {
     const outcome = await runOneIteration(deps, { ...initial, lastHadToolCalls: true });
 
     expect(outcome.kind).toBe('continue');
-    if (outcome.kind === 'continue') expect(outcome.state.retryCount).toBe(1);
+    if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('internal-retry');
+      expect(outcome.state.retryCount).toBe(1);
+    }
+  });
+
+  it('marks an empty response after tool calls as an internal retry', async () => {
+    chatScript = [{ type: 'done' }];
+
+    const outcome = await runOneIteration(
+      makeDeps(),
+      { ...initial, lastHadToolCalls: true },
+    );
+
+    expect(outcome.kind).toBe('continue');
+    if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('internal-retry');
+      expect(outcome.state.retryCount).toBe(1);
+    }
   });
 });
 
@@ -329,6 +347,7 @@ describe('runOneIteration / continue after tool calls', () => {
 
     expect(outcome.kind).toBe('continue');
     if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('tool-calls');
       expect(outcome.state.lastHadToolCalls).toBe(true);
       expect(outcome.state.iteration).toBe(1);
       expect(outcome.state.retryCount).toBe(0);
@@ -582,6 +601,7 @@ describe('runOneIteration / switch to cloud on refusal', () => {
 
     expect(outcome.kind).toBe('continue');
     if (outcome.kind === 'continue') {
+      expect(outcome.reason).toBe('model-switch');
       expect(outcome.state.switchedToCloud).toBe(true);
     }
     expect(deps.sink.events.some(e => e[0] === 'model_switch' && e[1] === 'qwen2.5-coder')).toBe(true);
