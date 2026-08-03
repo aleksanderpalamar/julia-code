@@ -31,6 +31,8 @@ export interface IterationDeps {
   temperament: string;
   maxIterations: number;
   extraSystemContent?: string;
+  /** Static trusted instruction supplied only to this iteration; never persisted. */
+  transientSystemContent?: string;
   /**
    * Whether the active skill (or default flow) expects the model to use tools.
    * Dialogue-only skills set this `false` via `expects_tools: false` to opt out
@@ -67,7 +69,7 @@ export async function runOneIteration(
 ): Promise<IterationOutcome> {
   const {
     sessionId, plan, toolSchemas, allowRules, planMode, temperament, maxIterations,
-    extraSystemContent, signal, approvedAllRef, requestApproval, emit,
+    extraSystemContent, transientSystemContent, signal, approvedAllRef, requestApproval, emit,
   } = deps;
 
   if (signal?.aborted) return { kind: 'aborted' };
@@ -92,7 +94,10 @@ export async function runOneIteration(
     sessionId,
     currentModel,
     auxModel: plan.auxModel,
-    options: { planMode, temperament, iteration, maxIterations, extraSystemContent },
+    options: {
+      planMode, temperament, iteration, maxIterations,
+      extraSystemContent, transientSystemContent,
+    },
     emit,
   });
 
@@ -212,7 +217,10 @@ async function runSynthesisPass(
   deps: IterationDeps,
   state: IterationState,
 ): Promise<IterationOutcome> {
-  const { sessionId, plan, planMode, temperament, maxIterations, extraSystemContent, emit } = deps;
+  const {
+    sessionId, plan, planMode, temperament, maxIterations,
+    extraSystemContent, transientSystemContent, emit,
+  } = deps;
   const { iteration } = state;
 
   emit.thinking();
@@ -221,7 +229,10 @@ async function runSynthesisPass(
     sessionId,
     currentModel: plan.auxModel,
     auxModel: plan.auxModel,
-    options: { planMode, temperament, iteration, maxIterations, extraSystemContent },
+    options: {
+      planMode, temperament, iteration, maxIterations,
+      extraSystemContent, transientSystemContent,
+    },
     emit,
   });
 

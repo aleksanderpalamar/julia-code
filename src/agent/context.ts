@@ -20,6 +20,7 @@ interface BuildContextOptions {
   iteration?: number;
   maxIterations?: number;
   extraSystemContent?: string;
+  transientSystemContent?: string;
 }
 
 interface BuildContextResult {
@@ -252,9 +253,14 @@ function buildSystemPrompt(options?: BuildContextOptions): string {
     ? '\n\n---\n\n## Skill Ativada\n\n' + options.extraSystemContent
     : '';
 
+  const transientSection = options?.transientSystemContent
+    ? '\n\n---\n\n## Instrução transitória da iteração\n\n' + options.transientSystemContent
+    : '';
+
   return skills.map(s => s.content).join('\n\n---\n\n')
     + (temperamentSkill ? '\n\n---\n\n' + temperamentSkill.content : '')
     + (skillSection ? skillSection : '')
+    + transientSection
     + '\n\n---\n\n' + envInfo
     + (planModeSection ? '\n\n---\n\n' + planModeSection : '')
     + (iterationSection ? '\n\n---\n\n' + iterationSection : '')

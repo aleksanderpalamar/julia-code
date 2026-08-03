@@ -1,23 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ChatChunk, ToolCall } from '../src/providers/types.js';
+import type { ChatChunk, ChatMessage, ToolCall } from '../src/providers/types.js';
 import type { ModelPlan } from '../src/agent/model-selection.js';
 import type { IterationDeps, IterationEventSink, IterationState } from '../src/agent/iteration.js';
 import type { ContextHealth } from '../src/context/health.js';
 
 let chatScript: ChatChunk[] = [];
+let chatMessages: ChatMessage[][] = [];
 
 vi.mock('../src/providers/registry.js', () => ({
   getProvider: () => ({
     name: 'mock',
-    async *chat() {
+    async *chat(input: { messages: ChatMessage[] }) {
+      chatMessages.push(input.messages);
       for (const c of chatScript) yield c;
     },
   }),
 }));
 
 vi.mock('../src/agent/context.js', () => ({
-  buildContext: vi.fn(async () => ({
-    messages: [],
+  buildContext: vi.fn(async (
+    _sessionId: string,
+    _model: string,
+    options?: { transientSystemContent?: string },
+  ) => ({
+    messages: options?.transientSystemContent
+      ? [{ role: 'system', content: options.transientSystemContent }]
+      : [],
     budget: { total: 8000, system: 0, reserved: 0, available: 8000 },
     health: { level: 'ok', usedTokens: 0, totalTokens: 8000, pctUsed: 0 } as ContextHealth,
   })),
@@ -146,6 +154,7 @@ const initial: IterationState = {
 
 beforeEach(() => {
   chatScript = [];
+  chatMessages = [];
   vi.mocked(evaluateToolCall).mockReset().mockResolvedValue({ kind: 'allowed' });
   vi.mocked(runToolCall).mockReset().mockImplementation(async ({ toolName }) => ({
     toolName,
@@ -212,6 +221,21 @@ describe('runOneIteration / done', () => {
 
     expect(outcome).toEqual({ kind: 'done', fullText: 'hello world' });
     expect(deps.sink.events.find(e => e[0] === 'usage')).toBeDefined();
+  });
+
+  it('adds transient system content only to the current model request', async () => {
+    chatScript = [{ type: 'text', text: 'recovered' }, { type: 'done' }];
+
+    await runOneIteration(
+      makeDeps({ transientSystemContent: '[intent-without-action] act now' }),
+      initial,
+    );
+    await runOneIteration(makeDeps(), initial);
+
+    expect(chatMessages[0]).toEqual([
+      { role: 'system', content: '[intent-without-action] act now' },
+    ]);
+    expect(chatMessages[1]).toEqual([]);
   });
 });
 

@@ -31,7 +31,7 @@ export function findDeferredToolIntent(text: string): AnnouncedToolIntent | null
 }
 
 function findAnnouncedToolIntents(text: string): AnnouncedToolIntent[] {
-  const lower = text.toLowerCase();
+  const lower = normalizeIntentText(text);
   const matches: AnnouncedToolIntent[] = [];
 
   for (const phrase of ANNOUNCED_TOOL_INTENT_PHRASES) {
@@ -39,9 +39,11 @@ function findAnnouncedToolIntents(text: string): AnnouncedToolIntent[] {
     while (fromIndex < lower.length) {
       const index = lower.indexOf(phrase, fromIndex);
       if (index === -1) break;
+      const intent = { index, phrase };
       const isPositiveMatch = hasPhraseBoundaries(lower, index, phrase)
-        && !isNegatedIntent(lower, index);
-      if (isPositiveMatch) matches.push({ index, phrase });
+        && !isNegatedIntent(lower, index)
+        && !isCompletedDirectAnswer(lower, intent);
+      if (isPositiveMatch) matches.push(intent);
       fromIndex = index + phrase.length;
     }
   }
@@ -50,7 +52,7 @@ function findAnnouncedToolIntents(text: string): AnnouncedToolIntent[] {
 }
 
 export function needsToolCalling(text: string): boolean {
-  const lower = text.toLowerCase();
+  const lower = normalizeIntentText(text);
 
   const refusalIndicators = [
     'não consigo acessar', 'não consigo executar', 'não consigo rodar',
@@ -83,7 +85,15 @@ export function needsToolCalling(text: string): boolean {
 }
 
 function isNegatedIntent(text: string, index: number): boolean {
-  const clauseStart = Math.max(
+  const clauseStart = findClauseStart(text, index);
+  const prefix = text.slice(clauseStart, index);
+  const portugueseNegation = /(?:^|[^\p{L}])(?:não|nao|nunca|jamais|nem)(?=$|[^\p{L}])/u;
+  const englishNegation = /(?:^|[^\p{L}])(?:not|never|don't|dont|do not|won't|wont|will not|can't|cant|cannot)(?=$|[^\p{L}])/u;
+  return portugueseNegation.test(prefix) || englishNegation.test(prefix);
+}
+
+function findClauseStart(text: string, index: number): number {
+  let clauseStart = Math.max(
     text.lastIndexOf('.', index - 1),
     text.lastIndexOf('!', index - 1),
     text.lastIndexOf('?', index - 1),
@@ -91,11 +101,14 @@ function isNegatedIntent(text: string, index: number): boolean {
     text.lastIndexOf(';', index - 1),
     text.lastIndexOf(':', index - 1),
     text.lastIndexOf('\n', index - 1),
-  );
-  const prefix = text.slice(clauseStart + 1, index).replaceAll('’', "'");
-  const portugueseNegation = /(?:^|[^\p{L}])(?:não|nao|nunca|jamais|nem)(?=$|[^\p{L}])/u;
-  const englishNegation = /(?:^|[^\p{L}])(?:not|never|don't|dont|do not|won't|wont|will not|can't|cant|cannot)(?=$|[^\p{L}])/u;
-  return portugueseNegation.test(prefix) || englishNegation.test(prefix);
+  ) + 1;
+
+  const coordinatingBoundary = /\b(?:but|yet|however|nevertheless|mas|porém|porem|contudo|todavia)\b|[—–]|\s-\s/gu;
+  for (const match of text.slice(0, index).matchAll(coordinatingBoundary)) {
+    clauseStart = Math.max(clauseStart, match.index + match[0].length);
+  }
+
+  return clauseStart;
 }
 
 function hasPhraseBoundaries(text: string, index: number, phrase: string): boolean {
@@ -118,4 +131,27 @@ function findSentenceEnd(text: string, index: number): number {
 
 function containsSubstantiveText(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text);
+}
+
+function isCompletedDirectAnswer(text: string, intent: AnnouncedToolIntent): boolean {
+  const sentenceEnd = findSentenceEnd(text, intent.index);
+  const suffix = text.slice(intent.index + intent.phrase.length, sentenceEnd);
+  const internalReasoning = /^\s*(?:mentally|conceptually|logically|in my head|without tools|mentalmente|conceitualmente|logicamente|de cabeça|sem ferramentas)\b/u;
+  if (internalReasoning.test(suffix)) return true;
+
+  const separator = /[:;,]|[—–]|\s-\s/u.exec(suffix);
+  if (!separator) return false;
+
+  const resultClause = suffix.slice(separator.index + separator[0].length).trim();
+  if (!containsSubstantiveText(resultClause)) return false;
+
+  const answerWord = /^(?:yes|no|sim|não|nao|correct|incorrect|correto|incorreto|done|pronto)(?=$|[\s,.!?;:])/u;
+  const resultPredicate = /(?:^|[^\p{L}])(?:is|are|was|were|equals|contains|shows|returns|exists|has|have|é|são|era|eram|está|estão|equivale|contém|contem|mostra|retorna|existe|tem|possui)(?=$|[^\p{L}])/u;
+  return answerWord.test(resultClause)
+    || resultPredicate.test(resultClause)
+    || /[=≠]/u.test(resultClause);
+}
+
+function normalizeIntentText(text: string): string {
+  return text.toLowerCase().replace(/[’‘ʼ]/gu, "'");
 }

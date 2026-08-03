@@ -141,7 +141,11 @@ describe('AgentLoop / intent recovery lifecycle', () => {
       'inspect the project',
       'Ainda vou ler o package.json.',
     );
-    expect(mocks.addMessage).toHaveBeenCalledWith(
+    expect(mocks.runOneIteration.mock.calls[0][0].transientSystemContent).toBeUndefined();
+    expect(mocks.runOneIteration.mock.calls[1][0].transientSystemContent).toContain(
+      '[intent-without-action]',
+    );
+    expect(mocks.addMessage).not.toHaveBeenCalledWith(
       'session-1',
       'system',
       expect.stringContaining('[intent-without-action]'),
@@ -171,5 +175,27 @@ describe('AgentLoop / intent recovery lifecycle', () => {
 
     expect(mocks.maybeAutoOrchestrate).not.toHaveBeenCalled();
     expect(mocks.runOneIteration).toHaveBeenCalledTimes(1);
+  });
+
+  it('expires the recovery nudge before a later user turn', async () => {
+    mocks.runOneIteration
+      .mockResolvedValueOnce({
+        kind: 'nudge-intent',
+        fullText: 'Vou ler o package.json agora.',
+        state: stateAfterNudge,
+      })
+      .mockResolvedValueOnce({ kind: 'done', fullText: 'package loaded' })
+      .mockResolvedValueOnce({ kind: 'done', fullText: 'later answer' });
+
+    const agent = new AgentLoop();
+    await agent.run('resumed-session', 'inspect the project');
+    const resumedAgent = new AgentLoop();
+    await resumedAgent.run('resumed-session', 'explain the result');
+
+    expect(mocks.runOneIteration.mock.calls[1][0].transientSystemContent).toContain(
+      '[intent-without-action]',
+    );
+    expect(mocks.runOneIteration.mock.calls[2][0].transientSystemContent).toBeUndefined();
+    expect(mocks.addMessage.mock.calls.filter(call => call[1] === 'system')).toHaveLength(0);
   });
 });

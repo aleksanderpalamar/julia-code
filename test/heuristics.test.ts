@@ -55,6 +55,7 @@ describe('needsToolCalling / intent indicators', () => {
   it('detects EN intent phrases', () => {
     expect(needsToolCalling('Let me check the file.')).toBe(true);
     expect(needsToolCalling("I'll run the tests now.")).toBe(true);
+    expect(needsToolCalling('I’ll check the file now.')).toBe(true);
     expect(needsToolCalling('Let me see what is there.')).toBe(true);
   });
 });
@@ -106,6 +107,26 @@ describe('findAnnouncedToolIntent', () => {
       index: 'Não há risco, '.length,
       phrase: 'vou rodar',
     });
+    expect(findAnnouncedToolIntent("I don't know but let me check the file.")).toEqual({
+      index: "I don't know but ".length,
+      phrase: 'let me check',
+    });
+    expect(findAnnouncedToolIntent('Não sei mas vou verificar o arquivo.')).toEqual({
+      index: 'Não sei mas '.length,
+      phrase: 'vou verificar',
+    });
+    expect(findAnnouncedToolIntent("I don't know — let me open the file.")).toEqual({
+      index: "I don't know — ".length,
+      phrase: 'let me open',
+    });
+  });
+
+  it('normalizes typographic apostrophes before matching and scoping', () => {
+    expect(findAnnouncedToolIntent('I’ll check the file now.')).toEqual({
+      index: 0,
+      phrase: "i'll check",
+    });
+    expect(findAnnouncedToolIntent('I can’t promise I’ll open the file.')).toBeNull();
   });
 
   it('does not classify internal analysis verbs as tool actions', () => {
@@ -126,5 +147,37 @@ describe('findDeferredToolIntent', () => {
     expect(findDeferredToolIntent(
       'Vou verificar as duas opções. A primeira é mais segura e a segunda é mais rápida.',
     )).toBeNull();
+  });
+
+  it('ignores a direct answer completed in the same sentence', () => {
+    const mentalAnswer = 'Let me check mentally: 2 + 2 is 4.';
+    const explicitAnswer = 'Let me check: the answer is 4.';
+
+    expect(findAnnouncedToolIntent(mentalAnswer)).toBeNull();
+    expect(findDeferredToolIntent(mentalAnswer)).toBeNull();
+    expect(needsToolCalling(mentalAnswer)).toBe(false);
+    expect(findDeferredToolIntent(explicitAnswer)).toBeNull();
+  });
+
+  it('keeps a tool target after a colon classified as deferred', () => {
+    expect(findDeferredToolIntent('Let me check: package.json')).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+    expect(findDeferredToolIntent('Let me check: 2026-report.md')).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+    expect(findDeferredToolIntent("Let me check the file, then I'll return with the result.")).toEqual({
+      index: 0,
+      phrase: 'let me check',
+    });
+  });
+
+  it('recognizes typographic contractions as deferred intent', () => {
+    expect(findDeferredToolIntent('I’ll check the file now.')).toEqual({
+      index: 0,
+      phrase: "i'll check",
+    });
   });
 });

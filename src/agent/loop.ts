@@ -106,6 +106,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       intentNudgeUsed: false,
     };
     let stopHookActive = false;
+    let transientSystemContent: string | undefined;
 
     try {
       if (!this.options.isSubagent && !sessionStartFired.has(sessionId)) {
@@ -197,7 +198,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       };
 
       while (state.iteration < maxIterations) {
-        const outcome = await runOneIteration(deps, state);
+        const iterationDeps = transientSystemContent
+          ? { ...deps, transientSystemContent }
+          : deps;
+        transientSystemContent = undefined;
+        const outcome = await runOneIteration(iterationDeps, state);
 
         if (outcome.kind === 'continue') {
           state = outcome.state;
@@ -206,7 +211,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         if (outcome.kind === 'nudge-intent') {
           this.emit('clear_streaming');
-          addMessage(sessionId, 'system', buildIntentNudge());
+          transientSystemContent = buildIntentNudge();
           log.retry({ sessionId, iteration: outcome.state.iteration, kind: 'intent-nudge' });
           state = outcome.state;
           continue;
