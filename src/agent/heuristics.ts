@@ -6,7 +6,7 @@ export interface AnnouncedToolIntent {
 const ANNOUNCED_TOOL_INTENT_PHRASES = [
   'vou verificar', 'vou checar', 'deixa eu ver', 'deixe-me verificar',
   'vou executar', 'vou rodar', 'vou ler', 'vou listar',
-  'vou abrir', 'vou inspecionar', 'vou analisar', 'vou explorar',
+  'vou abrir', 'vou inspecionar',
   'vou acessar', 'vou consultar', 'vou buscar',
   'let me check', 'let me verify', 'let me run', 'let me read',
   'let me look', 'let me see', 'let me open',
@@ -15,8 +15,24 @@ const ANNOUNCED_TOOL_INTENT_PHRASES = [
 
 /** Finds the first positive announcement of a tool-oriented action. */
 export function findAnnouncedToolIntent(text: string): AnnouncedToolIntent | null {
+  return findAnnouncedToolIntents(text)[0] ?? null;
+}
+
+/**
+ * Finds an announced action that is still pending at the end of the response.
+ * An announcement followed by another substantive sentence is treated as part
+ * of an answer, not as a deferred tool call.
+ */
+export function findDeferredToolIntent(text: string): AnnouncedToolIntent | null {
+  return findAnnouncedToolIntents(text).find(intent => {
+    const sentenceEnd = findSentenceEnd(text, intent.index);
+    return !containsSubstantiveText(text.slice(sentenceEnd));
+  }) ?? null;
+}
+
+function findAnnouncedToolIntents(text: string): AnnouncedToolIntent[] {
   const lower = text.toLowerCase();
-  let earliest: AnnouncedToolIntent | null = null;
+  const matches: AnnouncedToolIntent[] = [];
 
   for (const phrase of ANNOUNCED_TOOL_INTENT_PHRASES) {
     let fromIndex = 0;
@@ -24,15 +40,13 @@ export function findAnnouncedToolIntent(text: string): AnnouncedToolIntent | nul
       const index = lower.indexOf(phrase, fromIndex);
       if (index === -1) break;
       const isPositiveMatch = hasPhraseBoundaries(lower, index, phrase)
-        && !isNegatedPortugueseIntent(lower, index);
-      if (isPositiveMatch && (!earliest || index < earliest.index)) {
-        earliest = { index, phrase };
-      }
+        && !isNegatedIntent(lower, index);
+      if (isPositiveMatch) matches.push({ index, phrase });
       fromIndex = index + phrase.length;
     }
   }
 
-  return earliest;
+  return matches.sort((a, b) => a.index - b.index);
 }
 
 export function needsToolCalling(text: string): boolean {
@@ -68,9 +82,20 @@ export function needsToolCalling(text: string): boolean {
   return false;
 }
 
-function isNegatedPortugueseIntent(text: string, index: number): boolean {
-  const prefix = text.slice(Math.max(0, index - 8), index);
-  return /(?:não|nao)\s+$/.test(prefix);
+function isNegatedIntent(text: string, index: number): boolean {
+  const clauseStart = Math.max(
+    text.lastIndexOf('.', index - 1),
+    text.lastIndexOf('!', index - 1),
+    text.lastIndexOf('?', index - 1),
+    text.lastIndexOf(',', index - 1),
+    text.lastIndexOf(';', index - 1),
+    text.lastIndexOf(':', index - 1),
+    text.lastIndexOf('\n', index - 1),
+  );
+  const prefix = text.slice(clauseStart + 1, index).replaceAll('’', "'");
+  const portugueseNegation = /(?:^|[^\p{L}])(?:não|nao|nunca|jamais|nem)(?=$|[^\p{L}])/u;
+  const englishNegation = /(?:^|[^\p{L}])(?:not|never|don't|dont|do not|won't|wont|will not|can't|cant|cannot)(?=$|[^\p{L}])/u;
+  return portugueseNegation.test(prefix) || englishNegation.test(prefix);
 }
 
 function hasPhraseBoundaries(text: string, index: number, phrase: string): boolean {
@@ -78,4 +103,19 @@ function hasPhraseBoundaries(text: string, index: number, phrase: string): boole
   const after = text[index + phrase.length];
   const isWord = (char: string | undefined) => char !== undefined && /[\p{L}\p{N}_]/u.test(char);
   return !isWord(before) && !isWord(after);
+}
+
+function findSentenceEnd(text: string, index: number): number {
+  for (let i = index; i < text.length; i++) {
+    const char = text[i];
+    if (char === '\n') return i + 1;
+    if (char !== '.' && char !== '!' && char !== '?') continue;
+    const next = text[i + 1];
+    if (next === undefined || /\s/.test(next)) return i + 1;
+  }
+  return text.length;
+}
+
+function containsSubstantiveText(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
 }

@@ -1,7 +1,10 @@
 import { getSubagentManager, type SubagentManager } from '../subagent.js';
 import type { OrchestrationEventSink, PlannedSubtask } from './types.js';
 
-type SubagentEmit = Pick<OrchestrationEventSink, 'chunk' | 'subagentChunk' | 'subagentStatus' | 'progress'>;
+type SubagentEmit = Pick<
+  OrchestrationEventSink,
+  'chunk' | 'subagentChunk' | 'subagentClear' | 'subagentWarning' | 'subagentStatus' | 'progress'
+>;
 
 interface SubagentExecutionDeps {
   sessionId: string;
@@ -84,6 +87,14 @@ function bindPassThroughListeners(
     if (!isTracked(taskId)) return;
     emit.subagentChunk(taskId, resolveLabel(taskId), text);
   };
+  const onClear = (taskId: string) => {
+    if (!isTracked(taskId)) return;
+    emit.subagentClear(taskId, resolveLabel(taskId));
+  };
+  const onWarning = (taskId: string, message: string) => {
+    if (!isTracked(taskId)) return;
+    emit.subagentWarning(taskId, resolveLabel(taskId), message);
+  };
   const onStarted = (taskId: string) => {
     if (!isTracked(taskId)) return;
     emit.subagentStatus(taskId, resolveLabel(taskId), 'started');
@@ -98,12 +109,16 @@ function bindPassThroughListeners(
   };
 
   manager.on('task:chunk', onChunk);
+  manager.on('task:clear', onClear);
+  manager.on('task:warning', onWarning);
   manager.on('task:started', onStarted);
   manager.on('task:completed', onCompleted);
   manager.on('task:failed', onFailed);
 
   return () => {
     manager.off('task:chunk', onChunk);
+    manager.off('task:clear', onClear);
+    manager.off('task:warning', onWarning);
     manager.off('task:started', onStarted);
     manager.off('task:completed', onCompleted);
     manager.off('task:failed', onFailed);

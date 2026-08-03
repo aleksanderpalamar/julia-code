@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { findAnnouncedToolIntent, needsToolCalling } from '../src/agent/heuristics.js';
+import {
+  findAnnouncedToolIntent,
+  findDeferredToolIntent,
+  needsToolCalling,
+} from '../src/agent/heuristics.js';
 
 describe('needsToolCalling / refusal indicators', () => {
   it('detects PT refusals', () => {
@@ -87,5 +91,40 @@ describe('findAnnouncedToolIntent', () => {
   it('ignores negated Portuguese announcements', () => {
     expect(findAnnouncedToolIntent('Não vou rodar os testes neste exemplo.')).toBeNull();
     expect(findAnnouncedToolIntent('Eu nao vou abrir o arquivo.')).toBeNull();
+    expect(findAnnouncedToolIntent('Jamais vou rodar os testes neste exemplo.')).toBeNull();
+    expect(findAnnouncedToolIntent('Nunca vou abrir esse arquivo.')).toBeNull();
+  });
+
+  it('ignores scoped English negations', () => {
+    expect(findAnnouncedToolIntent("I don't think I'll run the tests.")).toBeNull();
+    expect(findAnnouncedToolIntent("I cannot promise I'll open that file.")).toBeNull();
+    expect(findAnnouncedToolIntent("I never said I'll read it.")).toBeNull();
+  });
+
+  it('does not let a negation in a previous clause suppress a positive intent', () => {
+    expect(findAnnouncedToolIntent('Não há risco, vou rodar os testes.')).toEqual({
+      index: 'Não há risco, '.length,
+      phrase: 'vou rodar',
+    });
+  });
+
+  it('does not classify internal analysis verbs as tool actions', () => {
+    expect(findAnnouncedToolIntent('Vou analisar as duas opções.')).toBeNull();
+    expect(findAnnouncedToolIntent('Vou explorar essa ideia com você.')).toBeNull();
+  });
+});
+
+describe('findDeferredToolIntent', () => {
+  it('finds a terminal action announcement', () => {
+    expect(findDeferredToolIntent('Para confirmar, vou ler o package.json agora.')).toEqual({
+      index: 'Para confirmar, '.length,
+      phrase: 'vou ler',
+    });
+  });
+
+  it('ignores an announcement followed by a substantive answer', () => {
+    expect(findDeferredToolIntent(
+      'Vou verificar as duas opções. A primeira é mais segura e a segunda é mais rápida.',
+    )).toBeNull();
   });
 });

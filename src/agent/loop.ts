@@ -152,7 +152,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       this.emit('thinking');
 
-      const orchestrated = await maybeAutoOrchestrate({
+      const orchestrated = skillExpectsTools && await maybeAutoOrchestrate({
         sessionId,
         userMessage,
         model: auxModel,
@@ -206,7 +206,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
         if (outcome.kind === 'nudge-intent') {
           this.emit('clear_streaming');
-          addMessage(sessionId, 'system', buildIntentNudge(outcome.fullText));
+          addMessage(sessionId, 'system', buildIntentNudge());
           log.retry({ sessionId, iteration: outcome.state.iteration, kind: 'intent-nudge' });
           state = outcome.state;
           continue;

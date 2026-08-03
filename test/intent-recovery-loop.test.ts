@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   retry: vi.fn(),
   runHook: vi.fn(),
   runOneIteration: vi.fn(),
+  maybeAutoOrchestrate: vi.fn(),
 }));
 
 vi.mock('../src/tools/registry.js', () => ({
@@ -67,7 +68,7 @@ vi.mock('../src/agent/loop/approval-gate.js', () => ({
 }));
 
 vi.mock('../src/agent/loop/workflow-decisions.js', () => ({
-  maybeAutoOrchestrate: vi.fn(async () => false),
+  maybeAutoOrchestrate: mocks.maybeAutoOrchestrate,
   maybeRunCompaction: vi.fn(async () => false),
 }));
 
@@ -95,6 +96,7 @@ describe('AgentLoop / intent recovery lifecycle', () => {
     vi.clearAllMocks();
     mocks.runHook.mockResolvedValue({});
     mocks.maybeGenerateTitle.mockResolvedValue('Recovered turn');
+    mocks.maybeAutoOrchestrate.mockResolvedValue(false);
   });
 
   it('clears the tentative stream and finalizes a warning through the normal lifecycle', async () => {
@@ -159,5 +161,15 @@ describe('AgentLoop / intent recovery lifecycle', () => {
     expect(mocks.runHook).toHaveBeenCalledWith('SubagentStop', expect.objectContaining({
       hook_event_name: 'SubagentStop',
     }));
+  });
+
+  it('skips auto-orchestration when the active skill opts out of tools', async () => {
+    mocks.runOneIteration.mockResolvedValueOnce({ kind: 'done', fullText: 'direct answer' });
+
+    const agent = new AgentLoop();
+    await agent.run('dialog-session', 'converse comigo', undefined, undefined, 'skill', false);
+
+    expect(mocks.maybeAutoOrchestrate).not.toHaveBeenCalled();
+    expect(mocks.runOneIteration).toHaveBeenCalledTimes(1);
   });
 });

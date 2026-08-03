@@ -101,6 +101,15 @@ export function runTask(deps: RunTaskDeps): void {
     emitter.emit('task:chunk', task.id, text);
   });
 
+  agent.on('clear_streaming', () => {
+    resultText = '';
+    emitter.emit('task:clear', task.id);
+  });
+
+  agent.on('warning', (message) => {
+    emitter.emit('task:warning', task.id, message);
+  });
+
   agent.on('done', async (fullText) => {
     if (task.status === 'completed' || task.status === 'failed') return;
     const mergeInfo = await finalizeWorktree(isolation.worktree);
@@ -154,4 +163,3 @@ export function runTask(deps: RunTaskDeps): void {
     });
   });
 }
-

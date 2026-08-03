@@ -17,7 +17,12 @@ interface GatewayOptions {
   port?: number;
 }
 
-type RecoveryGatewayEvent = 'clear_streaming' | 'warning';
+type RecoveryGatewayEvent = 'clear_streaming' | 'warning' | 'subagent_clear' | 'subagent_warning';
+
+export interface GatewayTerminalState {
+  response?: string;
+  error?: string;
+}
 
 /** Binds recovery events shared by JSON and SSE gateway adapters. */
 export function attachGatewayRecoveryEvents(
@@ -26,13 +31,69 @@ export function attachGatewayRecoveryEvents(
 ): () => void {
   const onClearStreaming = () => emit('clear_streaming', {});
   const onWarning = (message: string) => emit('warning', { message });
+  const onSubagentClear = (taskId: string, label: string) =>
+    emit('subagent_clear', { task_id: taskId, label });
+  const onSubagentWarning = (taskId: string, label: string, message: string) =>
+    emit('subagent_warning', { task_id: taskId, label, message });
 
   eventSource.on('clear_streaming', onClearStreaming);
   eventSource.on('warning', onWarning);
+  eventSource.on('subagent_clear', onSubagentClear);
+  eventSource.on('subagent_warning', onSubagentWarning);
 
   return () => {
     eventSource.off('clear_streaming', onClearStreaming);
     eventSource.off('warning', onWarning);
+    eventSource.off('subagent_clear', onSubagentClear);
+    eventSource.off('subagent_warning', onSubagentWarning);
+  };
+}
+
+/** Captures the terminal result used by the non-streaming JSON adapter. */
+export function attachGatewayTerminalEvents(
+  eventSource: AgentLoop,
+  state: GatewayTerminalState,
+  emit: (event: 'done' | 'error', data: unknown) => void,
+): () => void {
+  const onDone = (text: string) => {
+    state.response = text;
+    if (text) state.error = undefined;
+    emit('done', { text });
+  };
+  const onError = (error: string) => {
+    state.error = error;
+    emit('error', { error });
+  };
+
+  eventSource.on('done', onDone);
+  eventSource.on('error', onError);
+
+  return () => {
+    eventSource.off('done', onDone);
+    eventSource.off('error', onError);
+  };
+}
+
+export function buildGatewayChatResult(
+  sessionId: string,
+  terminal: GatewayTerminalState,
+  events: Array<{ type: string; data: unknown }>,
+): { status: number; body: Record<string, unknown> } {
+  if (terminal.error) {
+    return {
+      status: 500,
+      body: { session_id: sessionId, error: terminal.error, events },
+    };
+  }
+  if (terminal.response === undefined) {
+    return {
+      status: 500,
+      body: { session_id: sessionId, error: 'Agent completed without a terminal result', events },
+    };
+  }
+  return {
+    status: 200,
+    body: { session_id: sessionId, response: terminal.response, events },
   };
 }
 
@@ -117,6 +178,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const message = body.message as string;
 
     const events: Array<{ type: string; data: unknown }> = [];
+    const terminal: GatewayTerminalState = {};
 
     const onChunk = (text: string) => events.push({ type: 'chunk', data: text });
     const onToolCall = (tc: { function: { name: string } }) =>
@@ -131,6 +193,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       agent,
       (type, data) => events.push({ type, data }),
     );
+    const detachTerminalEvents = attachGatewayTerminalEvents(
+      agent,
+      terminal,
+      (type, data) => events.push({ type, data }),
+    );
 
     try {
       await queue.enqueue(sessionId, message, model);
@@ -139,16 +206,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       agent.off('tool_call', onToolCall);
       agent.off('tool_result', onToolResult);
       detachRecoveryEvents();
+      detachTerminalEvents();
     }
 
-    const messages = getMessages(sessionId);
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-
-    return json(res, 200, {
-      session_id: sessionId,
-      response: lastAssistant?.content ?? '',
-      events,
-    });
+    const result = buildGatewayChatResult(sessionId, terminal, events);
+    return json(res, result.status, result.body);
   }
 
   if (method === 'POST' && path === '/chat/stream') {

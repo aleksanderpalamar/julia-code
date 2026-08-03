@@ -19,6 +19,8 @@ export interface AgentEvents {
   clear_streaming: [];
   orchestration_progress: [progress: OrchestrationProgress];
   subagent_chunk: [taskId: string, label: string, text: string];
+  subagent_clear: [taskId: string, label: string];
+  subagent_warning: [taskId: string, label: string, message: string];
   subagent_status: [taskId: string, label: string, status: string, durationMs?: number];
   done: [fullText: string];
   warning: [message: string];

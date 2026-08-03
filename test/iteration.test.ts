@@ -415,6 +415,20 @@ describe('runOneIteration / intent-without-action', () => {
     expect(outcome.kind).toBe('done');
   });
 
+  it('does not discard a substantive answer that follows an intent-like phrase', async () => {
+    chatScript = [
+      {
+        type: 'text',
+        text: 'Vou verificar as duas opções. A primeira é mais segura; recomendo usá-la.',
+      },
+      { type: 'done' },
+    ];
+
+    const outcome = await runOneIteration(makeDeps(), initial);
+
+    expect(outcome.kind).toBe('done');
+  });
+
   it('does not nudge valid shell instructions or refusal explanations', async () => {
     chatScript = [
       { type: 'text', text: 'Use este comando:\n```bash\nnpm test\n```\nNão consigo prever o resultado sem executá-lo.' },

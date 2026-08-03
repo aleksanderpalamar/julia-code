@@ -147,6 +147,16 @@ export function useAgent(onSessionChanged?: () => void) {
       });
     };
 
+    const onSubagentClear = (taskId: string) => {
+      setEntries(e => e.filter(
+        entry => entry.type !== 'subagent_stream' || entry.toolName !== taskId
+      ));
+    };
+
+    const onSubagentWarning = (_taskId: string, label: string, message: string) => {
+      setEntries(e => [...e, { type: 'warning', content: `[${label}] ${message}` }]);
+    };
+
     const onSubagentStatus = (_taskId: string, label: string, status: string, durationMs?: number) => {
       const dur = durationMs !== undefined ? ` (${(durationMs / 1000).toFixed(1)}s)` : '';
       const icon = status === 'completed' ? '✓' : status === 'failed' ? '✗' : '▸';
@@ -171,6 +181,8 @@ export function useAgent(onSessionChanged?: () => void) {
       clear_streaming: onClearStreaming,
       orchestration_progress: onOrchestrationProgress,
       subagent_chunk: onSubagentChunk,
+      subagent_clear: onSubagentClear,
+      subagent_warning: onSubagentWarning,
       subagent_status: onSubagentStatus,
       done: onDone,
       warning: onWarning,

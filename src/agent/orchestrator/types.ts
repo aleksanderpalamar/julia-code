@@ -15,6 +15,8 @@ export interface OrchestrationEventSink {
   done(fullText: string): void;
   title(title: string): void;
   subagentChunk(taskId: string, label: string, text: string): void;
+  subagentClear(taskId: string, label: string): void;
+  subagentWarning(taskId: string, label: string, message: string): void;
   subagentStatus(taskId: string, label: string, status: string, durationMs?: number): void;
   progress(progress: OrchestrationProgress): void;
 }
