@@ -17,9 +17,9 @@ import {
 } from './report-builder.js';
 
 export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean> {
-  const { sessionId, userMessage, model, emit } = deps;
+  const { sessionId, turnId, userMessage, model, emit } = deps;
 
-  const plan = await planSubtasks({ sessionId, userMessage, model });
+  const plan = await planSubtasks({ sessionId, turnId, userMessage, model });
   if (plan.kind === 'simple') return false;
 
   const runId = randomUUID();

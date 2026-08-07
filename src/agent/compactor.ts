@@ -1,5 +1,6 @@
 import { getCompactableMessages, getEmergencyCompactableMessages } from './context.js';
-import { getLatestCompaction, saveCompaction } from '../session/manager.js';
+import { getLatestCompaction, saveCompaction, type Message } from '../session/manager.js';
+import { estimateDbMessageTokens, estimateTokens } from '../context/token-counter.js';
 import {
   performStructuredCompaction,
   serializeCompaction,
@@ -8,51 +9,58 @@ import {
   type StructuredCompaction,
 } from '../context/compaction.js';
 
+export interface CompactionOutcome {
+  performed: boolean;
+  messagesCompacted: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  durationMs: number;
+}
+
+const NO_COMPACTION: CompactionOutcome = {
+  performed: false,
+  messagesCompacted: 0,
+  tokensBefore: 0,
+  tokensAfter: 0,
+  durationMs: 0,
+};
+
 export async function maybeCompact(
   sessionId: string,
   model: string,
   beforeCompact?: () => Promise<boolean>,
-): Promise<boolean> {
+): Promise<CompactionOutcome> {
   const compactable = await getCompactableMessages(sessionId, model);
-  if (!compactable) return false;
+  if (!compactable) return NO_COMPACTION;
 
-  if (beforeCompact && !(await beforeCompact())) return false;
+  if (beforeCompact && !(await beforeCompact())) return NO_COMPACTION;
 
-  try {
-    const existingCompaction = getLatestCompaction(sessionId);
-
-    let existingStructured: StructuredCompaction | null = null;
-    if (existingCompaction) {
-      existingStructured = deserializeCompaction(
-        existingCompaction.summary,
-        existingCompaction.format,
-      );
-    }
-
-    const structured = await performStructuredCompaction(
-      compactable.messages,
-      existingStructured,
-      model,
-    );
-
-    const summary = serializeCompaction(structured);
-    if (summary) {
-      const startId = existingCompaction?.messages_end ?? 0;
-      saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
-    }
-  } catch {
-  }
-
-  return true;
+  return await summarizeInto(sessionId, model, compactable.messages, compactable.lastId);
 }
 
 export async function performEmergencyCompaction(
   sessionId: string,
   model: string,
   keepCount: number,
-): Promise<void> {
+): Promise<CompactionOutcome> {
   const compactable = await getEmergencyCompactableMessages(sessionId, model, keepCount);
-  if (!compactable) return;
+  if (!compactable) return NO_COMPACTION;
+
+  return await summarizeInto(sessionId, model, compactable.messages, compactable.lastId);
+}
+
+async function summarizeInto(
+  sessionId: string,
+  model: string,
+  messages: Message[],
+  lastId: number,
+): Promise<CompactionOutcome> {
+  const startedAt = Date.now();
+  const tokensBefore = messages.reduce(
+    (sum, m) => sum + estimateDbMessageTokens(m.content, m.tool_calls),
+    0,
+  );
+  let tokensAfter = 0;
 
   try {
     const existingCompaction = getLatestCompaction(sessionId);
@@ -65,19 +73,24 @@ export async function performEmergencyCompaction(
       );
     }
 
-    const structured = await performStructuredCompaction(
-      compactable.messages,
-      existingStructured,
-      model,
-    );
+    const structured = await performStructuredCompaction(messages, existingStructured, model);
 
     const summary = serializeCompaction(structured);
     if (summary) {
       const startId = existingCompaction?.messages_end ?? 0;
-      saveCompaction(sessionId, summary, startId, compactable.lastId, 'structured');
+      saveCompaction(sessionId, summary, startId, lastId, 'structured');
+      tokensAfter = estimateTokens(summary);
     }
   } catch {
   }
+
+  return {
+    performed: true,
+    messagesCompacted: messages.length,
+    tokensBefore,
+    tokensAfter,
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 /**

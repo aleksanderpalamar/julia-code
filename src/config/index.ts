@@ -95,6 +95,7 @@ export function loadConfig(): Config {
     contextEmergencyThreshold: settings?.context?.emergencyThreshold,
     contextMaxToolResultTokens: settings?.context?.maxToolResultTokens,
     memorySemantic: settings?.memory?.semantic,
+    rateLimits: settings?.security?.rateLimits,
   });
 
   if (_config.dbPath && !_config.dbPath.startsWith('/')) {

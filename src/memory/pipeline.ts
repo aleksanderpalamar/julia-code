@@ -1,15 +1,17 @@
 import { getConfig } from '../config/index.js';
 import { getRecentMemories } from '../session/manager.js';
 import { estimateTokens } from '../context/token-counter.js';
+import { recordEvent } from '../observability/logger.js';
 import { decideGating } from './gating.js';
 import { getEmbeddingProvider, isEmbeddingProviderAvailable } from './embeddings/index.js';
 import { retrieveRelevantMemories } from './retrieval.js';
 import { buildContextBlock } from './context-builder.js';
 
 export async function prepareMemoryContext(
-  _sessionId: string,
+  sessionId: string,
   input: string | null,
   budgetTokens: number,
+  turnId?: string,
 ): Promise<string> {
   if (budgetTokens <= 0) return '';
 
@@ -25,9 +27,14 @@ export async function prepareMemoryContext(
   const gate = decideGating(input);
   if (gate.skip) return '';
 
+  const startedAt = Date.now();
   const available = await isEmbeddingProviderAvailable();
   if (!available) {
     process.stderr.write('[memory] provider unavailable, using legacy recent-memories fallback\n');
+    recordRetrieval({
+      turnId, sessionId, candidates: 0, returned: 0, topScore: null,
+      startedAt, providerAvailable: false,
+    });
     return legacyRecentMemoriesBlock(budgetTokens);
   }
 
@@ -39,11 +46,42 @@ export async function prepareMemoryContext(
     limit: config.memorySemantic.maxMemories,
   });
 
+  recordRetrieval({
+    turnId,
+    sessionId,
+    candidates: ranked.length,
+    returned: ranked.length,
+    topScore: ranked[0]?.score ?? null,
+    startedAt,
+    providerAvailable: true,
+  });
+
   if (ranked.length === 0) {
     return legacyRecentMemoriesBlock(budgetTokens);
   }
 
   return buildContextBlock(ranked, budgetTokens);
+}
+
+function recordRetrieval(input: {
+  turnId: string | undefined;
+  sessionId: string;
+  candidates: number;
+  returned: number;
+  topScore: number | null;
+  startedAt: number;
+  providerAvailable: boolean;
+}): void {
+  if (!input.turnId) return;
+  recordEvent('memory_retrieval', {
+    turnId: input.turnId,
+    sessionId: input.sessionId,
+    candidates: input.candidates,
+    returned: input.returned,
+    topScore: input.topScore,
+    durationMs: Date.now() - input.startedAt,
+    providerAvailable: input.providerAvailable,
+  });
 }
 
 export function legacyRecentMemoriesBlock(budgetTokens: number): string {

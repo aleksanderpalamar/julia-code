@@ -23,6 +23,7 @@ export interface OrchestrationEventSink {
 
 export interface OrchestrationDeps {
   sessionId: string;
+  turnId: string;
   userMessage: string;
   model: string;
   emit: OrchestrationEventSink;

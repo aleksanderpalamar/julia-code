@@ -25,6 +25,16 @@ const SemanticMemorySchema = z.object({
   autoBackfillOnStart: false,
 });
 
+const ToolQuotaSchema = z.object({
+  perMinute: z.number().default(60),
+  perSession: z.number().default(600),
+});
+
+const RateLimitsSchema = z.object({
+  enabled: z.boolean().default(true),
+  perTool: z.record(ToolQuotaSchema).default({}),
+}).default({ enabled: true, perTool: {} });
+
 export const ConfigSchema = z.object({
   ollamaHost: z.string().default('http://localhost:11434'),
   defaultModel: z.string().default('qwen3:8b'),
@@ -51,6 +61,7 @@ export const ConfigSchema = z.object({
   contextEmergencyThreshold: z.number().default(0.90),
   contextMaxToolResultTokens: z.number().default(3000),
   memorySemantic: SemanticMemorySchema,
+  rateLimits: RateLimitsSchema,
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -125,6 +136,7 @@ export const SettingsSchema = z.object({
       tool: z.string(),
       pattern: z.string(),
     })).default([]),
+    rateLimits: RateLimitsSchema.optional(),
   }).optional(),
   hooks: HooksSchema,
 }).passthrough();

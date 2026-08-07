@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { AgentLoop } from './loop.js';
 import { createSession, createSubagentRun, updateSubagentRunStatus } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
-import { log } from '../observability/logger.js';
+import { recordEvent } from '../observability/logger.js';
 import { ConcurrencyController } from './subagent/concurrency.js';
 import { TaskQueue } from './subagent/queue.js';
 import { runTask } from './subagent/executor.js';
@@ -175,7 +175,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
       durationMs: task.durationMs,
       error: 'Cancelled',
     });
-    log.subagentDone({
+    recordEvent('subagent_done', {
       runId: task.runId,
       taskId: task.id,
       status: 'failed',

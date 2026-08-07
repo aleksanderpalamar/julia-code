@@ -1,11 +1,15 @@
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { getToolSchemas } from '../tools/registry.js';
 import { addMessage, getMessageCount } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
 import { setCurrentSessionId } from '../tools/memory.js';
 import { setSubagentSessionId } from '../tools/subagent.js';
 import { type AllowRule } from '../security/permissions.js';
-import { log } from '../observability/logger.js';
+import { ToolQuotaLedger } from '../security/quota-ledger.js';
+import type { QuotaGuard } from '../security/rate-limit.js';
+import type { Config } from '../config/types.js';
+import { recordEvent } from '../observability/logger.js';
 import { maybeGenerateTitle } from './title-generator.js';
 import { resolveModelPlan } from './model-selection.js';
 import { runOneIteration, type IterationDeps, type IterationState } from './iteration.js';
@@ -35,6 +39,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
   private approval = new SessionApprovalState();
   private allowRules: AllowRule[] = [];
   private abortController: AbortController | null = null;
+  private quotaLedger: ToolQuotaLedger | null = null;
 
   constructor(options?: AgentLoopOptions) {
     super();
@@ -83,6 +88,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
     setSubagentSessionId(sessionId);
     const config = getConfig();
     const requestedModel = model ?? config.defaultModel;
+    const turnId = randomUUID();
 
     const plan = await resolveModelPlan(requestedModel, config.toolModel, config.routeTools);
     const { loopModel, auxModel } = plan;
@@ -96,6 +102,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       toolSchemas = toolSchemas.filter(s => !this.options.excludeTools!.includes(s.function.name));
     }
     const maxIterations = this.options.maxIterations ?? config.maxToolIterations;
+    const quotas = this.resolveQuotaGuard(sessionId, config);
 
     const approvedAllRef = this.approval.createIterationRef();
     let state: IterationState = {
@@ -156,6 +163,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
       const orchestrated = skillExpectsTools && await maybeAutoOrchestrate({
         sessionId,
+        turnId,
         userMessage,
         model: auxModel,
         excludeTools: this.options.excludeTools,
@@ -166,7 +174,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         return;
       }
 
-      const compacted = await maybeRunCompaction(sessionId, auxModel, async () => {
+      const compaction = await maybeRunCompaction(sessionId, auxModel, async () => {
         const preCompact = await runHook('PreCompact', {
           session_id: sessionId,
           cwd: process.cwd(),
@@ -180,10 +188,22 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         }
         return true;
       });
-      if (compacted) this.emit('compacting');
+      if (compaction.performed) {
+        this.emit('compacting');
+        recordEvent('compaction', {
+          turnId,
+          sessionId,
+          kind: 'auto',
+          messagesCompacted: compaction.messagesCompacted,
+          tokensBefore: compaction.tokensBefore,
+          tokensAfter: compaction.tokensAfter,
+          durationMs: compaction.durationMs,
+        });
+      }
 
       const deps: IterationDeps = {
         sessionId,
+        turnId,
         plan,
         toolSchemas,
         allowRules: this.allowRules,
@@ -195,6 +215,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         signal: this.abortController.signal,
         approvedAllRef,
         requestApproval: (toolName, args) => requestApproval({ toolName, args, emitter: this }),
+        quotas,
         emit: createIterationSink(this),
       };
 
@@ -220,7 +241,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           this.emit('clear_streaming');
           transientSystemContent = buildIntentNudge();
           transientAssistantContent = outcome.fullText;
-          log.retry({ sessionId, iteration: outcome.state.iteration, kind: 'intent-nudge' });
+          recordEvent('retry', { turnId, sessionId, iteration: outcome.state.iteration, kind: 'intent-nudge' });
           state = outcome.state;
           continue;
         }
@@ -245,7 +266,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
           if (outcome.kind === 'done-with-warning') {
             this.emit('warning', outcome.message);
           }
-          log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'done' });
+          recordEvent('loop_end', { turnId, sessionId, iterations: state.iteration + 1, reason: 'done' });
           this.emit('done', outcome.fullText);
           void maybeGenerateTitle(sessionId, auxModel, userMessage, outcome.fullText).then(title => {
             if (title) this.emit('title', title);
@@ -255,14 +276,14 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         }
 
         if (outcome.kind === 'aborted') {
-          log.loopEnd({ sessionId, iterations: state.iteration, reason: 'aborted' });
+          recordEvent('loop_end', { turnId, sessionId, iterations: state.iteration, reason: 'aborted' });
           this.emit('error', 'Aborted');
           this.running = false;
           return;
         }
 
         if (outcome.kind === 'error') {
-          log.loopEnd({ sessionId, iterations: state.iteration + 1, reason: 'error' });
+          recordEvent('loop_end', { turnId, sessionId, iterations: state.iteration + 1, reason: 'error' });
           this.emit('error', outcome.message);
           this.emit('done', '');
           this.running = false;
@@ -271,11 +292,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
       }
 
       this.approval.syncFromRef(approvedAllRef);
-      log.loopEnd({ sessionId, iterations: state.iteration, reason: 'max_iterations' });
+      recordEvent('loop_end', { turnId, sessionId, iterations: state.iteration, reason: 'max_iterations' });
       addMessage(sessionId, 'assistant', '[Max tool iterations reached]', undefined, undefined, undefined, auxModel);
       this.emit('done', '[Max tool iterations reached]');
     } catch (err) {
-      log.loopEnd({ sessionId, iterations: state.iteration, reason: 'error' });
+      recordEvent('loop_end', { turnId, sessionId, iterations: state.iteration, reason: 'error' });
       this.emit('error', err instanceof Error ? err.message : String(err));
     } finally {
       this.running = false;
@@ -284,5 +305,14 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  private resolveQuotaGuard(sessionId: string, config: Config): QuotaGuard | undefined {
+    const limits = config.rateLimits;
+    if (!limits?.enabled) return undefined;
+    if (!this.quotaLedger) {
+      this.quotaLedger = new ToolQuotaLedger(limits.perTool);
+    }
+    return this.quotaLedger.forSession(sessionId);
   }
 }

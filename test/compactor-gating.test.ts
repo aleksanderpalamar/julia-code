@@ -29,7 +29,7 @@ describe('maybeCompact / beforeCompact callback', () => {
     vi.mocked(getCompactableMessages).mockResolvedValue(null);
     const cb = vi.fn().mockResolvedValue(true);
     const result = await maybeCompact('s', 'm', cb);
-    expect(result).toBe(false);
+    expect(result.performed).toBe(false);
     expect(cb).not.toHaveBeenCalled();
   });
 
@@ -37,7 +37,7 @@ describe('maybeCompact / beforeCompact callback', () => {
     vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
     const cb = vi.fn().mockResolvedValue(false);
     const result = await maybeCompact('s', 'm', cb);
-    expect(result).toBe(false);
+    expect(result.performed).toBe(false);
     expect(cb).toHaveBeenCalledOnce();
   });
 
@@ -45,13 +45,13 @@ describe('maybeCompact / beforeCompact callback', () => {
     vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
     const cb = vi.fn().mockResolvedValue(true);
     const result = await maybeCompact('s', 'm', cb);
-    expect(result).toBe(true);
+    expect(result.performed).toBe(true);
     expect(cb).toHaveBeenCalledOnce();
   });
 
   it('still works when beforeCompact is omitted (back-compat)', async () => {
     vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
     const result = await maybeCompact('s', 'm');
-    expect(result).toBe(true);
+    expect(result.performed).toBe(true);
   });
 });

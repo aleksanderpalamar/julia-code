@@ -47,7 +47,9 @@ vi.mock('../src/context/health.js', () => ({
 }));
 
 vi.mock('../src/agent/compactor.js', () => ({
-  performEmergencyCompaction: vi.fn(async () => undefined),
+  performEmergencyCompaction: vi.fn(async () => ({
+    performed: true, messagesCompacted: 3, tokensBefore: 900, tokensAfter: 120, durationMs: 5,
+  })),
 }));
 
 vi.mock('../src/agent/security-gate.js', () => ({
@@ -65,13 +67,7 @@ vi.mock('../src/agent/tool-executor.js', () => ({
 }));
 
 vi.mock('../src/observability/logger.js', () => ({
-  log: {
-    retry: vi.fn(),
-    toolCall: vi.fn(),
-    loopEnd: vi.fn(),
-    plannerDecision: vi.fn(),
-    diagnostics: vi.fn(),
-  },
+  recordEvent: vi.fn(),
 }));
 
 const mockConfig = {
@@ -133,6 +129,7 @@ function makeDeps(override: Partial<IterationDeps> = {}): IterationDeps & { sink
   const sink = makeSink();
   const deps: IterationDeps = {
     sessionId: 's1',
+    turnId: 'turn-1',
     plan: cloudPlan,
     toolSchemas: [],
     allowRules: [],
@@ -358,7 +355,7 @@ describe('runOneIteration / continue after tool calls', () => {
   it('skips executor when gate blocks the call', async () => {
     const tc: ToolCall = { id: 't1', function: { name: 'exec', arguments: { command: 'rm -rf /' } } };
     chatScript = [{ type: 'tool_call', toolCall: tc }, { type: 'done' }];
-    vi.mocked(evaluateToolCall).mockResolvedValue({ kind: 'blocked', reason: 'blocked cmd' });
+    vi.mocked(evaluateToolCall).mockResolvedValue({ kind: 'blocked', reason: 'blocked cmd', via: 'blocklist' });
 
     const deps = makeDeps();
     const outcome = await runOneIteration(deps, initial);
@@ -366,6 +363,33 @@ describe('runOneIteration / continue after tool calls', () => {
     expect(outcome.kind).toBe('continue');
     expect(runToolCall).not.toHaveBeenCalled();
     expect(deps.sink.events.find(e => e[0] === 'tool_result')).toBeDefined();
+  });
+
+  it('feeds a quota refusal back to the model as a tool observation', async () => {
+    const tc: ToolCall = { id: 't1', function: { name: 'exec', arguments: { command: 'ls' } } };
+    chatScript = [{ type: 'tool_call', toolCall: tc }, { type: 'done' }];
+    vi.mocked(evaluateToolCall).mockResolvedValue({
+      kind: 'rate_limited',
+      reason: 'Limite de uso da ferramenta "exec" atingido (janela de 1 minuto). Aguarde ~30s.',
+      via: 'quota',
+    });
+
+    const deps = makeDeps();
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome.kind).toBe('continue');
+    expect(runToolCall).not.toHaveBeenCalled();
+    expect(vi.mocked(addMessage)).toHaveBeenCalledWith(
+      's1',
+      'tool',
+      expect.stringContaining('Limite de uso'),
+      undefined,
+      't1',
+    );
+    expect(deps.sink.events).toContainEqual([
+      'tool_result',
+      { n: 'exec', t: expect.stringContaining('Limite de uso'), s: false },
+    ]);
   });
 });
 

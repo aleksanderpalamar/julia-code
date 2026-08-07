@@ -1,10 +1,11 @@
-import type { ToolCall, ChatMessage } from '../../providers/types.js';
+import type { ToolCall, ChatMessage, ChatChunk } from '../../providers/types.js';
 import type { ContextBudget } from '../../context/budget.js';
 import type { ContextHealth } from '../../context/health.js';
 import type { AllowRule } from '../../security/permissions.js';
+import type { QuotaGuard } from '../../security/rate-limit.js';
 import type { ApprovalResult } from '../../tui/components/ApprovalPrompt.js';
 import { addMessage } from '../../session/manager.js';
-import { log } from '../../observability/logger.js';
+import { recordEvent } from '../../observability/logger.js';
 import { getConfig } from '../../config/index.js';
 import { getProvider } from '../../providers/registry.js';
 import { evaluateToolCall } from '../security-gate.js';
@@ -29,6 +30,7 @@ interface ToolExecutionEmitter {
 
 interface ToolExecutionInput {
   sessionId: string;
+  turnId: string;
   iteration: number;
   toolCalls: ToolCall[];
   /** Conversation context — fed to the correction re-prompt on a bad call. */
@@ -40,6 +42,7 @@ interface ToolExecutionInput {
   allowRules: AllowRule[];
   approvedAllRef: { current: boolean };
   requestApproval: (toolName: string, args: Record<string, unknown>) => Promise<ApprovalResult>;
+  quotas?: QuotaGuard;
   signal: AbortSignal | undefined;
   emit: ToolExecutionEmitter;
 }
@@ -52,8 +55,8 @@ interface CorrectionBreaker {
 
 export async function executeIterationTools(input: ToolExecutionInput): Promise<{ aborted: boolean }> {
   const {
-    sessionId, iteration, toolCalls, messages, correctionModel, budget, health,
-    allowRules, approvedAllRef, requestApproval, signal, emit,
+    sessionId, turnId, iteration, toolCalls, messages, correctionModel, budget, health,
+    allowRules, approvedAllRef, requestApproval, quotas, signal, emit,
   } = input;
 
   const breaker: CorrectionBreaker = { consecutiveFailures: 0, disabled: false };
@@ -68,7 +71,7 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     // coerced, well-typed object. A malformed call goes through the correction
     // loop; if that fails, the schema errors are reported back to the model.
     const toolArgs = await resolveToolArgs({
-      sessionId, iteration, toolCall: tc, messages, correctionModel, breaker, emit, signal,
+      sessionId, turnId, iteration, toolCall: tc, messages, correctionModel, breaker, emit, signal,
     });
     // The correction loop above can await a full LLM request — re-check the
     // signal so a cancellation during it is honoured before the tool runs.
@@ -90,6 +93,7 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     );
     if (preHook.decision === 'block') {
       const reason = preHook.reason ?? 'Blocked by PreToolUse hook';
+      recordEvent('gate_decision', { turnId, sessionId, iteration, toolName, outcome: 'blocked', via: 'hook' });
       addMessage(sessionId, 'tool', reason, undefined, tc.id);
       emit.toolResult(toolName, reason, false);
       continue;
@@ -111,8 +115,11 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
       approvedAllForSession: approvedAllRef,
       requestApproval: wrappedRequestApproval,
       preApproved: preHook.decision === 'approve',
+      quotas,
     });
-    if (gate.kind === 'blocked') {
+    recordEvent('gate_decision', { turnId, sessionId, iteration, toolName, outcome: gate.kind, via: gate.via });
+
+    if (gate.kind === 'blocked' || gate.kind === 'rate_limited') {
       addMessage(sessionId, 'tool', gate.reason, undefined, tc.id);
       emit.toolResult(toolName, gate.reason, false);
       continue;
@@ -130,7 +137,8 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
       budget,
       health,
     });
-    log.toolCall({
+    recordEvent('tool_call', {
+      turnId,
       sessionId,
       iteration,
       name: toolName,
@@ -138,7 +146,7 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
       durationMs: executed.durationMs,
     });
     if (executed.deterministicRetryApplied) {
-      log.retry({ sessionId, iteration, kind: 'deterministic' });
+      recordEvent('retry', { turnId, sessionId, iteration, kind: 'deterministic' });
     }
 
     addMessage(sessionId, 'tool', executed.resultText, undefined, tc.id);
@@ -166,13 +174,14 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
     }
   }
 
-  await reportDiagnostics({ sessionId, iteration, changedFiles, signal, emit });
+  await reportDiagnostics({ sessionId, turnId, iteration, changedFiles, signal, emit });
 
   return { aborted: false };
 }
 
 interface ReportDiagnosticsInput {
   sessionId: string;
+  turnId: string;
   iteration: number;
   changedFiles: Set<string>;
   signal: AbortSignal | undefined;
@@ -186,7 +195,7 @@ interface ReportDiagnosticsInput {
  * nothing was edited — keeping the feature opt-in with zero default cost.
  */
 async function reportDiagnostics(input: ReportDiagnosticsInput): Promise<void> {
-  const { sessionId, iteration, changedFiles, signal, emit } = input;
+  const { sessionId, turnId, iteration, changedFiles, signal, emit } = input;
   if (changedFiles.size === 0 || signal?.aborted) return;
 
   const config = getConfig();
@@ -204,7 +213,7 @@ async function reportDiagnostics(input: ReportDiagnosticsInput): Promise<void> {
   });
   if (signal?.aborted) return;
 
-  log.diagnostics({ sessionId, iteration, ok: outcome.ok, durationMs: Date.now() - startedAt });
+  recordEvent('diagnostics', { turnId, sessionId, iteration, ok: outcome.ok, durationMs: Date.now() - startedAt });
 
   if (!outcome.ok) {
     addMessage(sessionId, 'system', `[diagnostics]\n${outcome.report}`);
@@ -214,6 +223,7 @@ async function reportDiagnostics(input: ReportDiagnosticsInput): Promise<void> {
 
 interface ResolveArgsInput {
   sessionId: string;
+  turnId: string;
   iteration: number;
   toolCall: ToolCall;
   messages: ChatMessage[];
@@ -229,7 +239,9 @@ interface ResolveArgsInput {
  * (in which case the schema errors are already recorded as a tool result).
  */
 async function resolveToolArgs(input: ResolveArgsInput): Promise<Record<string, unknown> | null> {
-  const { sessionId, iteration, toolCall, messages, correctionModel, breaker, emit, signal } = input;
+  const {
+    sessionId, turnId, iteration, toolCall, messages, correctionModel, breaker, emit, signal,
+  } = input;
   const toolName = toolCall.function.name;
 
   const validation = validateAndCoerceArgs(getToolParameters(toolName), toolCall.function.arguments);
@@ -239,7 +251,7 @@ async function resolveToolArgs(input: ResolveArgsInput): Promise<Record<string, 
   }
 
   const corrected = await correctOrNull({
-    sessionId, iteration, toolCall, errors: validation.errors,
+    sessionId, turnId, iteration, toolCall, errors: validation.errors,
     correctionModel, messages, breaker, emit, signal,
   });
   if (corrected) return corrected;
@@ -252,6 +264,7 @@ async function resolveToolArgs(input: ResolveArgsInput): Promise<Record<string, 
 
 interface CorrectOrNullInput {
   sessionId: string;
+  turnId: string;
   iteration: number;
   toolCall: ToolCall;
   errors: ArgError[];
@@ -264,7 +277,9 @@ interface CorrectOrNullInput {
 
 /** Runs the focused correction loop, honouring config and the circuit breaker. */
 async function correctOrNull(input: CorrectOrNullInput): Promise<Record<string, unknown> | null> {
-  const { sessionId, iteration, toolCall, errors, correctionModel, messages, breaker, emit, signal } = input;
+  const {
+    sessionId, turnId, iteration, toolCall, errors, correctionModel, messages, breaker, emit, signal,
+  } = input;
   const toolName = toolCall.function.name;
 
   const maxAttempts = getConfig().toolCorrectionAttempts;
@@ -275,7 +290,7 @@ async function correctOrNull(input: CorrectOrNullInput): Promise<Record<string, 
 
   emit.chunk('🔧 Corrigindo chamada de ferramenta...\n');
 
-  const chat: ChatStreamFn = params => getProvider('ollama').chat(params);
+  const chat = observedChat({ turnId, sessionId, iteration, model: correctionModel });
   const outcome = await attemptCorrection({
     toolCall, errors, toolSchema, messages,
     model: correctionModel, maxAttempts, chat, signal,
@@ -283,7 +298,7 @@ async function correctOrNull(input: CorrectOrNullInput): Promise<Record<string, 
 
   if (outcome.kind === 'corrected') {
     breaker.consecutiveFailures = 0;
-    log.retry({ sessionId, iteration, kind: 'tool-correction' });
+    recordEvent('retry', { turnId, sessionId, iteration, kind: 'tool-correction' });
     return outcome.args;
   }
 
@@ -292,4 +307,41 @@ async function correctOrNull(input: CorrectOrNullInput): Promise<Record<string, 
     breaker.disabled = true;
   }
   return null;
+}
+
+function observedChat(ctx: {
+  turnId: string;
+  sessionId: string;
+  iteration: number;
+  model: string;
+}): ChatStreamFn {
+  return async function* observed(params): AsyncGenerator<ChatChunk> {
+    const startedAt = Date.now();
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let toolCallCount = 0;
+
+    try {
+      for await (const chunk of getProvider('ollama').chat(params)) {
+        if (chunk.type === 'tool_call') toolCallCount++;
+        if (chunk.type === 'done' && chunk.usage) {
+          promptTokens = chunk.usage.promptTokens;
+          completionTokens = chunk.usage.completionTokens;
+        }
+        yield chunk;
+      }
+    } finally {
+      recordEvent('llm_call', {
+        turnId: ctx.turnId,
+        sessionId: ctx.sessionId,
+        iteration: ctx.iteration,
+        model: ctx.model,
+        pass: 'correction',
+        durationMs: Date.now() - startedAt,
+        promptTokens,
+        completionTokens,
+        toolCallCount,
+      });
+    }
+  };
 }

@@ -22,6 +22,7 @@ interface BuildContextOptions {
   extraSystemContent?: string;
   transientSystemContent?: string;
   transientAssistantContent?: string;
+  turnId?: string;
 }
 
 interface BuildContextResult {
@@ -79,7 +80,7 @@ export async function buildContext(
 
   const userInput = getLatestUserMessage(sessionId);
   const [memoriesSection, repoCodeSection] = await Promise.all([
-    prepareMemoryContext(sessionId, userInput, budget.memories),
+    prepareMemoryContext(sessionId, userInput, budget.memories, options?.turnId),
     prepareRepoCodeContext(userInput, budget.repoCode),
   ]);
   if (memoriesSection) {

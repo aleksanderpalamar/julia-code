@@ -1,6 +1,6 @@
 import { getConfig } from '../../config/index.js';
 import { runOrchestration, type OrchestrationEventSink } from '../orchestrator/index.js';
-import { maybeCompact } from '../compactor.js';
+import { maybeCompact, type CompactionOutcome } from '../compactor.js';
 
 function shouldAutoOrchestrate(excludeTools?: string[]): boolean {
   const config = getConfig();
@@ -11,6 +11,7 @@ function shouldAutoOrchestrate(excludeTools?: string[]): boolean {
 
 export async function maybeAutoOrchestrate(input: {
   sessionId: string;
+  turnId: string;
   userMessage: string;
   model: string;
   excludeTools?: string[];
@@ -19,6 +20,7 @@ export async function maybeAutoOrchestrate(input: {
   if (!shouldAutoOrchestrate(input.excludeTools)) return false;
   return await runOrchestration({
     sessionId: input.sessionId,
+    turnId: input.turnId,
     userMessage: input.userMessage,
     model: input.model,
     emit: input.emit,
@@ -29,6 +31,6 @@ export async function maybeRunCompaction(
   sessionId: string,
   auxModel: string,
   beforeCompact?: () => Promise<boolean>,
-): Promise<boolean> {
+): Promise<CompactionOutcome> {
   return await maybeCompact(sessionId, auxModel, beforeCompact);
 }

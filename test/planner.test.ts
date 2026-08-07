@@ -28,8 +28,8 @@ vi.mock("../src/agent/complexity.ts", () => ({
 
 const plannerDecisionMock = vi.fn();
 vi.mock("../src/observability/logger.js", () => ({
-  log: {
-    plannerDecision: (args: unknown) => plannerDecisionMock(args),
+  recordEvent: (type: string, payload: unknown) => {
+    if (type === "planner_decision") plannerDecisionMock(payload);
   },
 }));
 
