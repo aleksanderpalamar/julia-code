@@ -15,7 +15,12 @@ class FakeManager extends EventEmitter {
   private tasks = new Map<string, FakeTaskState>();
   private counter = 0;
   public prewarmCalls: number[] = [];
-  public spawnCalls: Array<{ parentSessionId: string; descriptors: unknown[]; runId: string }> = [];
+  public spawnCalls: Array<{
+    parentSessionId: string;
+    descriptors: unknown[];
+    runId: string;
+    parentTurnId: string | undefined;
+  }> = [];
 
   prewarm(count: number): void {
     this.prewarmCalls.push(count);
@@ -29,8 +34,11 @@ class FakeManager extends EventEmitter {
     parentSessionId: string,
     descriptors: Array<{ task: string; model?: string; sharedContext?: string }>,
     runId: string,
+    _model?: string,
+    _sharedContext?: string,
+    parentTurnId?: string,
   ): Promise<string[]> {
-    this.spawnCalls.push({ parentSessionId, descriptors, runId });
+    this.spawnCalls.push({ parentSessionId, descriptors, runId, parentTurnId });
     const ids: string[] = [];
     for (const _ of descriptors) {
       const id = `t-${++this.counter}`;
@@ -133,6 +141,7 @@ describe("executeSubagents", () => {
 
     const resultPromise = executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: undefined,
@@ -153,6 +162,10 @@ describe("executeSubagents", () => {
     const result = await resultPromise;
 
     expect(fakeManager.prewarmCalls).toEqual([2]);
+    expect(fakeManager.spawnCalls[0]).toMatchObject({
+      parentSessionId: "s1",
+      parentTurnId: "turn-1",
+    });
     expect(result.completed).toBe(1);
     expect(result.failed).toBe(1);
     expect(result.allDone).toBe(false);
@@ -177,6 +190,7 @@ describe("executeSubagents", () => {
 
     const resultPromise = executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: undefined,
@@ -209,6 +223,7 @@ describe("executeSubagents", () => {
 
     const result = await executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: undefined,
@@ -225,6 +240,7 @@ describe("executeSubagents", () => {
 
     const resultPromise = executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: undefined,
@@ -247,6 +263,7 @@ describe("executeSubagents", () => {
 
     const resultPromise = executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: undefined,
@@ -275,6 +292,7 @@ describe("executeSubagents", () => {
 
     const resultPromise = executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: "<snapshot>",
@@ -299,6 +317,7 @@ describe("executeSubagents", () => {
 
     const resultPromise = executeSubagents({
       sessionId: "s1",
+      turnId: "turn-1",
       runId: "run-1",
       subtasks: twoSubtasks,
       sharedContext: undefined,

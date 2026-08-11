@@ -1,9 +1,10 @@
 import type { ToolCall, TokenUsage, ToolSchema } from '../providers/types.js';
 import type { ContextHealth } from '../context/health.js';
 import type { AllowRule } from '../security/permissions.js';
+import type { QuotaGuard } from '../security/rate-limit.js';
 import type { ApprovalResult } from '../tui/components/ApprovalPrompt.js';
 import { addMessage } from '../session/manager.js';
-import { log } from '../observability/logger.js';
+import { recordEvent } from '../observability/logger.js';
 import { chooseIterationModel, type ModelPlan } from './model-selection.js';
 import { prepareIterationContext } from './iteration/context-prep.js';
 import { streamLLMChat } from './iteration/llm-chat.js';
@@ -24,6 +25,7 @@ export interface IterationEventSink {
 
 export interface IterationDeps {
   sessionId: string;
+  turnId: string;
   plan: ModelPlan;
   toolSchemas: ToolSchema[];
   allowRules: AllowRule[];
@@ -45,6 +47,7 @@ export interface IterationDeps {
   /** Mutable across iterations — flipped by the security gate when the user picks "approve all". */
   approvedAllRef: { current: boolean };
   requestApproval: (toolName: string, args: Record<string, unknown>) => Promise<ApprovalResult>;
+  quotas?: QuotaGuard;
   emit: IterationEventSink;
 }
 
@@ -72,9 +75,9 @@ export async function runOneIteration(
   prevState: IterationState,
 ): Promise<IterationOutcome> {
   const {
-    sessionId, plan, toolSchemas, allowRules, planMode, temperament, maxIterations,
+    sessionId, turnId, plan, toolSchemas, allowRules, planMode, temperament, maxIterations,
     extraSystemContent, transientSystemContent, transientAssistantContent,
-    signal, approvedAllRef, requestApproval, emit,
+    signal, approvedAllRef, requestApproval, quotas, emit,
   } = deps;
 
   if (signal?.aborted) return { kind: 'aborted' };
@@ -97,6 +100,7 @@ export async function runOneIteration(
 
   const { messages, budget, health } = await prepareIterationContext({
     sessionId,
+    turnId,
     currentModel,
     auxModel: plan.auxModel,
     options: {
@@ -108,12 +112,14 @@ export async function runOneIteration(
 
   const streamed = await streamLLMChat({
     sessionId,
+    turnId,
     iteration,
     model: currentModel,
     messages,
     tools: currentTools,
     canRetryOnError: lastHadToolCalls && retryCount < 1,
     emit,
+    pass: 'main',
     suppressText: routingActive,
   });
 
@@ -149,7 +155,7 @@ export async function runOneIteration(
 
   if (decision.kind === 'empty-retry') {
     retryCount++;
-    log.retry({ sessionId, iteration, kind: 'empty' });
+    recordEvent('retry', { turnId, sessionId, iteration, kind: 'empty' });
     return {
       kind: 'continue',
       reason: 'internal-retry',
@@ -190,6 +196,7 @@ export async function runOneIteration(
 
   const { aborted } = await executeIterationTools({
     sessionId,
+    turnId,
     iteration,
     toolCalls,
     messages,
@@ -199,6 +206,7 @@ export async function runOneIteration(
     allowRules,
     approvedAllRef,
     requestApproval,
+    quotas,
     signal,
     emit,
   });
@@ -223,7 +231,7 @@ async function runSynthesisPass(
   state: IterationState,
 ): Promise<IterationOutcome> {
   const {
-    sessionId, plan, planMode, temperament, maxIterations,
+    sessionId, turnId, plan, planMode, temperament, maxIterations,
     extraSystemContent, transientSystemContent, transientAssistantContent, emit,
   } = deps;
   const { iteration } = state;
@@ -232,6 +240,7 @@ async function runSynthesisPass(
 
   const { messages } = await prepareIterationContext({
     sessionId,
+    turnId,
     currentModel: plan.auxModel,
     auxModel: plan.auxModel,
     options: {
@@ -243,12 +252,14 @@ async function runSynthesisPass(
 
   const streamed = await streamLLMChat({
     sessionId,
+    turnId,
     iteration,
     model: plan.auxModel,
     messages,
     tools: undefined,
     canRetryOnError: false,
     emit,
+    pass: 'synthesis',
   });
 
   if (streamed.kind !== 'ok') {

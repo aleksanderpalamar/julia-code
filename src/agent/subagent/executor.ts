@@ -3,7 +3,7 @@ import { AgentLoop } from '../loop.js';
 import { updateSubagentRunStatus } from '../../session/manager.js';
 import { getConfig } from '../../config/index.js';
 import { toolContextStorage } from '../../tools/registry.js';
-import { log } from '../../observability/logger.js';
+import { recordEvent } from '../../observability/logger.js';
 import type { ConcurrencyController } from './concurrency.js';
 import { setupIsolation, finalizeWorktree, teardownWorktree } from './isolation.js';
 import type { SubagentTask, SubagentEvents } from './types.js';
@@ -45,7 +45,9 @@ function finalizeTask(opts: FinalizeOpts): void {
     ...(status === 'completed' ? { result } : { error }),
   });
 
-  log.subagentDone({
+  recordEvent('subagent_done', {
+    turnId: task.parentTurnId,
+    sessionId: task.parentSessionId,
     runId: task.runId,
     taskId: task.id,
     status,
@@ -75,7 +77,9 @@ export function runTask(deps: RunTaskDeps): void {
     startedAt: task.startedAt.toISOString(),
   });
 
-  log.subagentSpawn({
+  recordEvent('subagent_spawn', {
+    turnId: task.parentTurnId,
+    sessionId: task.parentSessionId,
     runId: task.runId,
     taskId: task.id,
     model,

@@ -183,9 +183,53 @@ When Julia Code starts, it connects to each server and automatically registers t
       "availabilityCheckTtlMs": 30000,
       "autoBackfillOnStart": false
     }
+  },
+  "security": {
+    "allowRules": [],
+    "rateLimits": {
+      "enabled": true,
+      "perTool": {
+        "exec": { "perMinute": 20, "perSession": 200 }
+      }
+    }
   }
 }
 ```
+
+### Tool rate limits
+
+Every tool call is checked against a per-session budget before it runs. The limits exist to stop a runaway loop — not to ration ordinary use — so the defaults are deliberately loose:
+
+| Tool | Per minute | Per session |
+|---|---|---|
+| `exec` | 20 | 200 |
+| `fetch` | 30 | 300 |
+| `subagent` | 5 | 40 |
+| everything else | 60 | 600 |
+
+Override any of them under `security.rateLimits.perTool`, or set `security.rateLimits.enabled` to `false` to turn the check off entirely.
+
+When a tool exceeds its budget the call is refused and the reason is handed back to the model as a tool observation, so it can wait, change approach, or answer with what it already gathered. The budget is enforced independently of approval: approving a tool — even with "approve all" — waives the prompt, not the quota. The command blocklist is checked first, so a blocked command stays blocked regardless of remaining budget.
+
+Quota refusals show up in `/stats` under `Security gate`.
+
+### Observability
+
+Every step of a turn is written as one JSON line to `~/.juliacode/logs/events.jsonl`. Events from the same user turn share a `turnId`, so two turns in the same session stay separable:
+
+| Event | Records |
+|---|---|
+| `llm_call` | model, pass (`main` / `synthesis` / `correction`), duration, tokens in/out, tool-call count |
+| `tool_call` | tool name, success, duration |
+| `gate_decision` | tool name, outcome, and which rule decided it |
+| `compaction` | kind (`auto` / `emergency`), messages compacted, tokens before/after |
+| `memory_retrieval` | candidates, returned, top score, provider availability |
+| `retry` | kind (`stream`, `empty`, `deterministic`, `tool-correction`, `intent-nudge`) |
+| `diagnostics` | project-check result and duration |
+| `planner_decision`, `subagent_spawn`, `subagent_done` | orchestration lifecycle |
+| `loop_end` | iteration count and why the turn ended |
+
+Run `/stats` to see these aggregated. Set `JULIA_DEBUG=1` to mirror every event to stderr, or `JULIA_LOG_DIR` to write elsewhere. Logging is fire-and-forget and never affects control flow.
 
 ### Custom skills (`~/.juliacode/skills/`)
 

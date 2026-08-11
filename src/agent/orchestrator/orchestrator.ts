@@ -15,12 +15,28 @@ import {
   buildResultsText,
   buildFinalOutput,
 } from './report-builder.js';
+import { recordEvent } from '../../observability/logger.js';
 
 export async function runOrchestration(deps: OrchestrationDeps): Promise<boolean> {
-  const { sessionId, userMessage, model, emit } = deps;
+  const { sessionId, turnId, userMessage, model, emit } = deps;
 
-  const plan = await planSubtasks({ sessionId, userMessage, model });
+  const plan = await planSubtasks({ sessionId, turnId, userMessage, model });
   if (plan.kind === 'simple') return false;
+
+  const quotaNow = Date.now();
+  const quotaVerdict = deps.quotas?.check('subagent', quotaNow);
+  if (quotaVerdict?.kind === 'exceeded') {
+    recordEvent('gate_decision', {
+      turnId,
+      sessionId,
+      iteration: 0,
+      toolName: 'subagent',
+      outcome: 'rate_limited',
+      via: 'quota',
+    });
+    return false;
+  }
+  deps.quotas?.record('subagent', quotaNow);
 
   const runId = randomUUID();
   const start = Date.now();

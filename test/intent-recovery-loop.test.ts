@@ -2,9 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   addMessage: vi.fn(),
-  loopEnd: vi.fn(),
   maybeGenerateTitle: vi.fn(),
-  retry: vi.fn(),
+  recordEvent: vi.fn(),
   runHook: vi.fn(),
   runOneIteration: vi.fn(),
   maybeAutoOrchestrate: vi.fn(),
@@ -32,10 +31,7 @@ vi.mock('../src/tools/memory.js', () => ({ setCurrentSessionId: vi.fn() }));
 vi.mock('../src/tools/subagent.js', () => ({ setSubagentSessionId: vi.fn() }));
 
 vi.mock('../src/observability/logger.js', () => ({
-  log: {
-    loopEnd: mocks.loopEnd,
-    retry: mocks.retry,
-  },
+  recordEvent: mocks.recordEvent,
 }));
 
 vi.mock('../src/agent/title-generator.js', () => ({
@@ -69,7 +65,9 @@ vi.mock('../src/agent/loop/approval-gate.js', () => ({
 
 vi.mock('../src/agent/loop/workflow-decisions.js', () => ({
   maybeAutoOrchestrate: mocks.maybeAutoOrchestrate,
-  maybeRunCompaction: vi.fn(async () => false),
+  maybeRunCompaction: vi.fn(async () => ({
+    performed: false, messagesCompacted: 0, tokensBefore: 0, tokensAfter: 0, durationMs: 0,
+  })),
 }));
 
 vi.mock('../src/hooks/runner.js', () => ({
@@ -121,7 +119,8 @@ describe('AgentLoop / intent recovery lifecycle', () => {
     await agent.run('session-1', 'inspect the project');
 
     expect(events).toEqual(['clear_streaming', 'warning', 'done']);
-    expect(mocks.retry).toHaveBeenCalledWith({
+    expect(mocks.recordEvent).toHaveBeenCalledWith('retry', {
+      turnId: expect.any(String),
       sessionId: 'session-1',
       iteration: 1,
       kind: 'intent-nudge',
@@ -130,7 +129,8 @@ describe('AgentLoop / intent recovery lifecycle', () => {
       session_id: 'session-1',
       hook_event_name: 'Stop',
     }));
-    expect(mocks.loopEnd).toHaveBeenCalledWith({
+    expect(mocks.recordEvent).toHaveBeenCalledWith('loop_end', {
+      turnId: expect.any(String),
       sessionId: 'session-1',
       iterations: 2,
       reason: 'done',

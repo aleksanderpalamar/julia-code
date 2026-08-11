@@ -1,5 +1,5 @@
 import type { SlashCommand } from "./types.js";
-import { getAllMetrics, formatMetricsForDisplay } from "../../../observability/metrics.js";
+import { getAllMetrics, formatMetricsForDisplay } from "../../../observability/metrics/index.js";
 
 export const stats: SlashCommand = {
   match: (t) => t === "/stats",

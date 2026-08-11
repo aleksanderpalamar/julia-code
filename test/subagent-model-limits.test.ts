@@ -37,10 +37,7 @@ vi.mock("../src/agent/worktree.ts", () => ({
 }));
 
 vi.mock("../src/observability/logger.js", () => ({
-  log: {
-    subagentSpawn: vi.fn(),
-    subagentDone: vi.fn(),
-  },
+  recordEvent: vi.fn(),
 }));
 
 vi.mock("../src/tools/registry.js", () => ({

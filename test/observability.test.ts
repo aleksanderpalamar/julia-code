@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { log, resetLoggerStateForTests, getObservabilityLogPath } from '../src/observability/logger.js';
-import { computeLoopMetrics, computeToolMetrics } from '../src/observability/metrics.js';
+import { recordEvent, resetLoggerStateForTests, getObservabilityLogPath, flushObservability } from '../src/observability/logger.js';
+import { loadEvents, computeLoopMetrics, computeToolMetrics } from '../src/observability/metrics/index.js';
 
 let logDir: string;
 
@@ -21,11 +21,14 @@ describe('observability/logger', () => {
 
   afterEach(() => {
     delete process.env.JULIA_LOG_DIR;
+    delete process.env.JULIA_DEBUG;
+    vi.restoreAllMocks();
     rmSync(logDir, { recursive: true, force: true });
   });
 
   it('writes planner decision events to JSONL', async () => {
-    log.plannerDecision({
+    recordEvent('planner_decision', {
+      turnId: 't1',
       sessionId: 's1',
       complex: true,
       subtaskCount: 3,
@@ -48,9 +51,9 @@ describe('observability/logger', () => {
   });
 
   it('writes tool_call, retry, and loop_end events', async () => {
-    log.toolCall({ sessionId: 's1', iteration: 2, name: 'read', success: true, durationMs: 42 });
-    log.retry({ sessionId: 's1', iteration: 3, kind: 'stream' });
-    log.loopEnd({ sessionId: 's1', iterations: 5, reason: 'done' });
+    recordEvent('tool_call', { turnId: 't1', sessionId: 's1', iteration: 2, name: 'read', success: true, durationMs: 42 });
+    recordEvent('retry', { turnId: 't1', sessionId: 's1', iteration: 3, kind: 'stream' });
+    recordEvent('loop_end', { turnId: 't1', sessionId: 's1', iterations: 5, reason: 'done' });
 
     await flushLogger();
 
@@ -71,7 +74,7 @@ describe('observability/logger', () => {
     resetLoggerStateForTests();
 
     expect(() => {
-      log.toolCall({ sessionId: 's1', iteration: 1, name: 'x', success: true, durationMs: 1 });
+      recordEvent('tool_call', { turnId: 't1', sessionId: 's1', iteration: 1, name: 'x', success: true, durationMs: 1 });
     }).not.toThrow();
 
     await flushLogger();
@@ -83,7 +86,7 @@ describe('observability/logger', () => {
 
   it('does not create the log file until the first event', async () => {
     expect(existsSync(join(logDir, 'events.jsonl'))).toBe(false);
-    log.loopEnd({ sessionId: 's1', iterations: 1, reason: 'done' });
+    recordEvent('loop_end', { turnId: 't1', sessionId: 's1', iterations: 1, reason: 'done' });
     await flushLogger();
     expect(existsSync(join(logDir, 'events.jsonl'))).toBe(true);
   });
@@ -102,16 +105,16 @@ describe('observability/metrics (JSONL)', () => {
   });
 
   it('computes loop metrics from logged events', async () => {
-    log.loopEnd({ sessionId: 's1', iterations: 3, reason: 'done' });
-    log.loopEnd({ sessionId: 's2', iterations: 7, reason: 'done' });
-    log.loopEnd({ sessionId: 's3', iterations: 25, reason: 'max_iterations' });
-    log.retry({ sessionId: 's1', iteration: 2, kind: 'stream' });
-    log.retry({ sessionId: 's2', iteration: 4, kind: 'empty' });
-    log.retry({ sessionId: 's3', iteration: 24, kind: 'intent-nudge' });
+    recordEvent('loop_end', { turnId: 't1', sessionId: 's1', iterations: 3, reason: 'done' });
+    recordEvent('loop_end', { turnId: 't1', sessionId: 's2', iterations: 7, reason: 'done' });
+    recordEvent('loop_end', { turnId: 't1', sessionId: 's3', iterations: 25, reason: 'max_iterations' });
+    recordEvent('retry', { turnId: 't1', sessionId: 's1', iteration: 2, kind: 'stream' });
+    recordEvent('retry', { turnId: 't1', sessionId: 's2', iteration: 4, kind: 'empty' });
+    recordEvent('retry', { turnId: 't1', sessionId: 's3', iteration: 24, kind: 'intent-nudge' });
 
     await flushLogger();
 
-    const metrics = await computeLoopMetrics();
+    const metrics = computeLoopMetrics(await loadEvents());
     expect(metrics.totalLoops).toBe(3);
     expect(metrics.maxIterations).toBe(25);
     expect(metrics.reasons.done).toBe(2);
@@ -125,14 +128,14 @@ describe('observability/metrics (JSONL)', () => {
   });
 
   it('computes tool metrics per tool name', async () => {
-    log.toolCall({ sessionId: 's1', iteration: 1, name: 'read', success: true, durationMs: 10 });
-    log.toolCall({ sessionId: 's1', iteration: 2, name: 'read', success: true, durationMs: 30 });
-    log.toolCall({ sessionId: 's1', iteration: 3, name: 'read', success: false, durationMs: 5 });
-    log.toolCall({ sessionId: 's1', iteration: 4, name: 'edit', success: true, durationMs: 100 });
+    recordEvent('tool_call', { turnId: 't1', sessionId: 's1', iteration: 1, name: 'read', success: true, durationMs: 10 });
+    recordEvent('tool_call', { turnId: 't1', sessionId: 's1', iteration: 2, name: 'read', success: true, durationMs: 30 });
+    recordEvent('tool_call', { turnId: 't1', sessionId: 's1', iteration: 3, name: 'read', success: false, durationMs: 5 });
+    recordEvent('tool_call', { turnId: 't1', sessionId: 's1', iteration: 4, name: 'edit', success: true, durationMs: 100 });
 
     await flushLogger();
 
-    const metrics = await computeToolMetrics();
+    const metrics = computeToolMetrics(await loadEvents());
     expect(metrics.totalCalls).toBe(4);
     expect(metrics.perTool.read.calls).toBe(3);
     expect(metrics.perTool.read.failures).toBe(1);
@@ -142,9 +145,159 @@ describe('observability/metrics (JSONL)', () => {
   });
 
   it('handles absent log file gracefully', async () => {
-    const metrics = await computeLoopMetrics();
+    const metrics = computeLoopMetrics(await loadEvents());
     expect(metrics.totalLoops).toBe(0);
     expect(metrics.avgIterations).toBeNull();
     expect(metrics.maxIterations).toBeNull();
+  });
+});
+
+describe('observability/logger — turn-scoped events', () => {
+  beforeEach(() => {
+    logDir = mkdtempSync(join(tmpdir(), 'juliacode-obs-turn-'));
+    process.env.JULIA_LOG_DIR = logDir;
+    resetLoggerStateForTests();
+  });
+
+  afterEach(() => {
+    delete process.env.JULIA_LOG_DIR;
+    rmSync(logDir, { recursive: true, force: true });
+  });
+
+  function readLines(): Array<Record<string, unknown>> {
+    return readFileSync(getObservabilityLogPath(), 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map(l => JSON.parse(l));
+  }
+
+  it('writes llm_call with the pass, model, tokens and tool-call count', async () => {
+    recordEvent('llm_call', {
+      turnId: 't1', sessionId: 's1', iteration: 1, model: 'qwen3:8b', pass: 'main',
+      durationMs: 1200, promptTokens: 900, completionTokens: 120, toolCallCount: 2,
+    });
+
+    await flushObservability();
+
+    const [event] = readLines();
+    expect(event).toMatchObject({
+      type: 'llm_call', turnId: 't1', model: 'qwen3:8b', pass: 'main',
+      promptTokens: 900, completionTokens: 120, toolCallCount: 2,
+    });
+  });
+
+  it('writes gate_decision with the outcome and the deciding rule', async () => {
+    recordEvent('gate_decision', {
+      turnId: 't1', sessionId: 's1', iteration: 2,
+      toolName: 'exec', outcome: 'rate_limited', via: 'quota',
+    });
+
+    await flushObservability();
+
+    expect(readLines()[0]).toMatchObject({
+      type: 'gate_decision', toolName: 'exec', outcome: 'rate_limited', via: 'quota',
+    });
+  });
+
+  it('writes compaction with the token reduction', async () => {
+    recordEvent('compaction', {
+      turnId: 't1', sessionId: 's1', kind: 'emergency',
+      messagesCompacted: 12, tokensBefore: 8000, tokensAfter: 600, durationMs: 900,
+    });
+
+    await flushObservability();
+
+    expect(readLines()[0]).toMatchObject({
+      type: 'compaction', kind: 'emergency', tokensBefore: 8000, tokensAfter: 600,
+    });
+  });
+
+  it('writes memory_retrieval including the unavailable-provider case', async () => {
+    recordEvent('memory_retrieval', {
+      turnId: 't1', sessionId: 's1', candidates: 0, returned: 0,
+      topScore: null, durationMs: 3, providerAvailable: false,
+    });
+
+    await flushObservability();
+
+    expect(readLines()[0]).toMatchObject({
+      type: 'memory_retrieval', providerAvailable: false, topScore: null,
+    });
+  });
+
+  it('stamps one turnId across every event of a turn and separates two turns', async () => {
+    recordEvent('llm_call', {
+      turnId: 'turn-a', sessionId: 's1', iteration: 1, model: 'm', pass: 'main',
+      durationMs: 1, promptTokens: 1, completionTokens: 1, toolCallCount: 0,
+    });
+    recordEvent('tool_call', { turnId: 'turn-a', sessionId: 's1', iteration: 1, name: 'read', success: true, durationMs: 1 });
+    recordEvent('loop_end', { turnId: 'turn-a', sessionId: 's1', iterations: 1, reason: 'done' });
+    recordEvent('loop_end', { turnId: 'turn-b', sessionId: 's1', iterations: 2, reason: 'done' });
+
+    await flushObservability();
+
+    const lines = readLines();
+    expect(lines.filter(l => l.turnId === 'turn-a')).toHaveLength(3);
+    expect(lines.filter(l => l.turnId === 'turn-b')).toHaveLength(1);
+  });
+
+  it('writes events in emission order so a trace reads sequentially', async () => {
+    for (let i = 0; i < 25; i++) {
+      recordEvent('tool_call', {
+        turnId: 't1', sessionId: 's1', iteration: i, name: `tool-${i}`, success: true, durationMs: 1,
+      });
+    }
+
+    await flushObservability();
+
+    const names = readLines().map(l => l.name);
+    expect(names).toEqual(Array.from({ length: 25 }, (_, i) => `tool-${i}`));
+  });
+});
+
+describe('observability/logger — write chain resilience', () => {
+  beforeEach(() => {
+    logDir = mkdtempSync(join(tmpdir(), 'juliacode-obs-chain-'));
+    process.env.JULIA_LOG_DIR = logDir;
+    resetLoggerStateForTests();
+  });
+
+  afterEach(() => {
+    delete process.env.JULIA_LOG_DIR;
+    delete process.env.JULIA_DEBUG;
+    vi.restoreAllMocks();
+    rmSync(logDir, { recursive: true, force: true });
+  });
+
+  it('keeps logging after an unwritable stretch instead of stalling the chain', async () => {
+    process.env.JULIA_LOG_DIR = '/dev/null/nope';
+    resetLoggerStateForTests();
+    recordEvent('loop_end', { turnId: 't1', sessionId: 's1', iterations: 1, reason: 'error' });
+    await flushObservability();
+
+    process.env.JULIA_LOG_DIR = logDir;
+    resetLoggerStateForTests();
+    recordEvent('loop_end', { turnId: 't2', sessionId: 's1', iterations: 2, reason: 'done' });
+    await flushObservability();
+
+    const lines = readFileSync(getObservabilityLogPath(), 'utf-8')
+      .split('\n').filter(Boolean).map(l => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ turnId: 't2', reason: 'done' });
+  });
+
+  it('mirrors debug events even when file logging fails', async () => {
+    process.env.JULIA_DEBUG = '1';
+    process.env.JULIA_LOG_DIR = '/dev/null/nope';
+    resetLoggerStateForTests();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    recordEvent('loop_end', {
+      turnId: 't-debug', sessionId: 's1', iterations: 1, reason: 'error',
+    });
+    await flushObservability();
+
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('[obs]'));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('"turnId":"t-debug"'));
   });
 });

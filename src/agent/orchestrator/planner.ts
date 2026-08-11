@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../../providers/types.js';
 import { getProvider } from '../../providers/registry.js';
 import { listOllamaModels } from '../../providers/ollama.js';
-import { log, type PlannerVia } from '../../observability/logger.js';
+import { recordEvent, type PlannerVia } from '../../observability/logger.js';
 import { analyzeComplexity } from '../complexity.js';
 import { getCachedPlannerResult, setCachedPlannerResult, type CachedPlannerResult } from '../planner-cache.js';
 import type { PlannedSubtask } from './types.js';
@@ -12,6 +12,7 @@ type PlanOutcome =
 
 interface PlannerDeps {
   sessionId: string;
+  turnId: string;
   userMessage: string;
   model: string;
 }
@@ -19,7 +20,7 @@ interface PlannerDeps {
 type RawAnalysis = CachedPlannerResult;
 
 export async function planSubtasks(deps: PlannerDeps): Promise<PlanOutcome> {
-  const { sessionId, userMessage, model } = deps;
+  const { sessionId, turnId, userMessage, model } = deps;
   const plannerStart = Date.now();
   const taskPreview = userMessage.slice(0, 120).replace(/\n/g, ' ');
 
@@ -28,7 +29,8 @@ export async function planSubtasks(deps: PlannerDeps): Promise<PlanOutcome> {
     subtaskCount: number,
     via: PlannerVia,
   ): void => {
-    log.plannerDecision({
+    recordEvent('planner_decision', {
+      turnId,
       sessionId,
       complex,
       subtaskCount,

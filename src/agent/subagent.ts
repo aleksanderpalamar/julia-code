@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { AgentLoop } from './loop.js';
 import { createSession, createSubagentRun, updateSubagentRunStatus } from '../session/manager.js';
 import { getConfig } from '../config/index.js';
-import { log } from '../observability/logger.js';
+import { recordEvent } from '../observability/logger.js';
 import { ConcurrencyController } from './subagent/concurrency.js';
 import { TaskQueue } from './subagent/queue.js';
 import { runTask } from './subagent/executor.js';
@@ -38,6 +38,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     runId: string,
     model?: string,
     sharedContext?: string,
+    parentTurnId?: string,
   ): Promise<string> {
     const config = getConfig();
     const taskId = randomUUID();
@@ -49,6 +50,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     const task: SubagentTask = {
       id: taskId,
       runId,
+      parentTurnId: parentTurnId ?? runId,
       parentSessionId,
       sessionId,
       task: desc,
@@ -79,11 +81,12 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     runId: string,
     model?: string,
     sharedContext?: string,
+    parentTurnId?: string,
   ): Promise<string[]> {
     return Promise.all(
       tasks.map(t => {
         if (typeof t === 'string') {
-          return this.spawn(parentSessionId, t, runId, model, sharedContext);
+          return this.spawn(parentSessionId, t, runId, model, sharedContext, parentTurnId);
         }
         return this.spawn(
           parentSessionId,
@@ -91,6 +94,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
           runId,
           t.model ?? model,
           t.sharedContext ?? sharedContext,
+          parentTurnId,
         );
       })
     );
@@ -175,7 +179,9 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
       durationMs: task.durationMs,
       error: 'Cancelled',
     });
-    log.subagentDone({
+    recordEvent('subagent_done', {
+      turnId: task.parentTurnId,
+      sessionId: task.parentSessionId,
       runId: task.runId,
       taskId: task.id,
       status: 'failed',

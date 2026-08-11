@@ -4,9 +4,11 @@ import { getSubagentManager } from '../agent/subagent.js';
 import { listOrchestrationRuns, createOrchestrationRun } from '../session/manager.js';
 
 let currentSessionId: string | undefined;
+let currentTurnId: string | undefined;
 
-export function setSubagentSessionId(id: string): void {
+export function setSubagentSessionId(id: string, turnId?: string): void {
   currentSessionId = id;
+  currentTurnId = turnId;
 }
 
 export const subagentTool: ToolDefinition = {
@@ -46,11 +48,13 @@ export const subagentTool: ToolDefinition = {
     required: ['action'],
   },
 
-  async execute(args, _context?) {
+  async execute(args, context?) {
     const action = args.action as string;
     const manager = getSubagentManager();
+    const sessionId = context?.sessionId ?? currentSessionId;
+    const turnId = context?.turnId ?? currentTurnId;
 
-    if (!currentSessionId) {
+    if (!sessionId) {
       return { success: false, output: '', error: 'No active session for subagent orchestration' };
     }
 
@@ -62,8 +66,8 @@ export const subagentTool: ToolDefinition = {
         const task = String(args.task);
         const model = args.model ? String(args.model) : undefined;
         const runId = randomUUID();
-        createOrchestrationRun(runId, currentSessionId, task, 1);
-        const taskId = await manager.spawn(currentSessionId, task, runId, model);
+        createOrchestrationRun(runId, sessionId, task, 1);
+        const taskId = await manager.spawn(sessionId, task, runId, model, undefined, turnId);
         return { success: true, output: `Subagent spawned. Task ID: ${taskId}\nRun ID: ${runId}` };
       }
 
@@ -75,8 +79,15 @@ export const subagentTool: ToolDefinition = {
         const tasks = rawTasks.map(t => String(t));
         const model = args.model ? String(args.model) : undefined;
         const runId = randomUUID();
-        createOrchestrationRun(runId, currentSessionId, tasks.join('; ').slice(0, 200), tasks.length);
-        const taskIds = await manager.spawnMany(currentSessionId, tasks, runId, model);
+        createOrchestrationRun(runId, sessionId, tasks.join('; ').slice(0, 200), tasks.length);
+        const taskIds = await manager.spawnMany(
+          sessionId,
+          tasks,
+          runId,
+          model,
+          undefined,
+          turnId,
+        );
         return {
           success: true,
           output: `${taskIds.length} subagents spawned.\nRun ID: ${runId}\nTask IDs:\n${taskIds.map((id, i) => `  ${i + 1}. ${id}`).join('\n')}`,
@@ -109,7 +120,7 @@ export const subagentTool: ToolDefinition = {
       }
 
       case 'list': {
-        const tasks = manager.listTasks(currentSessionId);
+        const tasks = manager.listTasks(sessionId);
         if (tasks.length === 0) {
           return { success: true, output: 'No subagent tasks for this session.' };
         }
@@ -127,7 +138,7 @@ export const subagentTool: ToolDefinition = {
         if (taskIds && taskIds.length > 0) {
           results = await manager.waitTasks(taskIds);
         } else {
-          results = await manager.waitAll(currentSessionId);
+          results = await manager.waitAll(sessionId);
         }
 
         if (results.length === 0) {
@@ -154,7 +165,7 @@ export const subagentTool: ToolDefinition = {
       }
 
       case 'runs': {
-        const runs = listOrchestrationRuns(currentSessionId);
+        const runs = listOrchestrationRuns(sessionId);
         if (runs.length === 0) {
           return { success: true, output: 'No orchestration runs for this session.' };
         }
@@ -179,7 +190,7 @@ export const subagentTool: ToolDefinition = {
       }
 
       case 'cancel_all': {
-        const count = manager.cancelAll(currentSessionId);
+        const count = manager.cancelAll(sessionId);
         return { success: true, output: `${count} task(s) cancelled.` };
       }
 

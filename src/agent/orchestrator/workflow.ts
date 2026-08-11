@@ -16,12 +16,13 @@ export async function executeOrchestrationWorkflow(input: {
   deps: OrchestrationDeps;
 }): Promise<WorkflowResult> {
   const { runId, subtasks, deps } = input;
-  const { sessionId, emit } = deps;
+  const { sessionId, turnId, emit } = deps;
 
   const sharedContext = buildSharedContextSnapshot(sessionId);
 
   const { resultLines, completed, failed, allDone } = await executeSubagents({
     sessionId,
+    turnId,
     runId,
     subtasks,
     sharedContext,

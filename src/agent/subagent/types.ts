@@ -1,6 +1,7 @@
 export interface SubagentTask {
   id: string;
   runId: string;
+  parentTurnId: string;
   parentSessionId: string;
   sessionId: string;
   task: string;

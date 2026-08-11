@@ -1,4 +1,5 @@
 import type { TokenUsage } from '../../providers/types.js';
+import type { QuotaGuard } from '../../security/rate-limit.js';
 
 export interface OrchestrationProgress {
   runId: string;
@@ -23,8 +24,10 @@ export interface OrchestrationEventSink {
 
 export interface OrchestrationDeps {
   sessionId: string;
+  turnId: string;
   userMessage: string;
   model: string;
+  quotas?: QuotaGuard;
   emit: OrchestrationEventSink;
 }
 

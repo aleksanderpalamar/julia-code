@@ -183,9 +183,53 @@ Ao iniciar o Julia Code, ela conecta a cada servidor e registra as tools automat
       "availabilityCheckTtlMs": 30000,
       "autoBackfillOnStart": false
     }
+  },
+  "security": {
+    "allowRules": [],
+    "rateLimits": {
+      "enabled": true,
+      "perTool": {
+        "exec": { "perMinute": 20, "perSession": 200 }
+      }
+    }
   }
 }
 ```
+
+### Limites de uso das ferramentas
+
+Toda chamada de ferramenta passa por um orçamento por sessão antes de executar. O objetivo é conter um loop desgovernado — não racionar uso normal —, então os padrões são propositalmente folgados:
+
+| Ferramenta | Por minuto | Por sessão |
+|---|---|---|
+| `exec` | 20 | 200 |
+| `fetch` | 30 | 300 |
+| `subagent` | 5 | 40 |
+| demais | 60 | 600 |
+
+Sobrescreva qualquer um deles em `security.rateLimits.perTool`, ou coloque `security.rateLimits.enabled` como `false` para desligar a verificação.
+
+Quando uma ferramenta estoura o orçamento, a chamada é recusada e o motivo volta para o modelo como observação de ferramenta — ele pode esperar, mudar de abordagem ou responder com o que já coletou. O orçamento é independente da aprovação: aprovar uma ferramenta, mesmo com "aprovar tudo", dispensa o prompt, não a cota. A blocklist de comandos é verificada primeiro, então um comando bloqueado continua bloqueado independentemente do orçamento restante.
+
+Recusas por cota aparecem no `/stats`, na seção `Security gate`.
+
+### Observabilidade
+
+Cada passo de um turno vira uma linha JSON em `~/.juliacode/logs/events.jsonl`. Eventos do mesmo turno compartilham um `turnId`, então dois turnos da mesma sessão continuam separáveis:
+
+| Evento | Registra |
+|---|---|
+| `llm_call` | modelo, passe (`main` / `synthesis` / `correction`), duração, tokens de entrada/saída, quantidade de tool calls |
+| `tool_call` | nome da ferramenta, sucesso, duração |
+| `gate_decision` | nome da ferramenta, desfecho e qual regra decidiu |
+| `compaction` | tipo (`auto` / `emergency`), mensagens compactadas, tokens antes/depois |
+| `memory_retrieval` | candidatos, retornados, melhor score, disponibilidade do provider |
+| `retry` | tipo (`stream`, `empty`, `deterministic`, `tool-correction`, `intent-nudge`) |
+| `diagnostics` | resultado e duração da checagem do projeto |
+| `planner_decision`, `subagent_spawn`, `subagent_done` | ciclo de vida da orquestração |
+| `loop_end` | número de iterações e por que o turno terminou |
+
+Use `/stats` para ver isso agregado. Defina `JULIA_DEBUG=1` para espelhar cada evento no stderr, ou `JULIA_LOG_DIR` para gravar em outro lugar. O log é fire-and-forget e nunca afeta o fluxo de controle.
 
 ### Skills customizadas (`~/.juliacode/skills/`)
 
