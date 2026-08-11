@@ -38,6 +38,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     runId: string,
     model?: string,
     sharedContext?: string,
+    parentTurnId?: string,
   ): Promise<string> {
     const config = getConfig();
     const taskId = randomUUID();
@@ -49,6 +50,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     const task: SubagentTask = {
       id: taskId,
       runId,
+      parentTurnId: parentTurnId ?? runId,
       parentSessionId,
       sessionId,
       task: desc,
@@ -79,11 +81,12 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
     runId: string,
     model?: string,
     sharedContext?: string,
+    parentTurnId?: string,
   ): Promise<string[]> {
     return Promise.all(
       tasks.map(t => {
         if (typeof t === 'string') {
-          return this.spawn(parentSessionId, t, runId, model, sharedContext);
+          return this.spawn(parentSessionId, t, runId, model, sharedContext, parentTurnId);
         }
         return this.spawn(
           parentSessionId,
@@ -91,6 +94,7 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
           runId,
           t.model ?? model,
           t.sharedContext ?? sharedContext,
+          parentTurnId,
         );
       })
     );
@@ -176,6 +180,8 @@ export class SubagentManager extends EventEmitter<SubagentEvents> {
       error: 'Cancelled',
     });
     recordEvent('subagent_done', {
+      turnId: task.parentTurnId,
+      sessionId: task.parentSessionId,
       runId: task.runId,
       taskId: task.id,
       status: 'failed',

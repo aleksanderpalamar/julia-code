@@ -5,6 +5,7 @@ import type { SubagentEvents, SubagentTask } from '../src/agent/subagent/types.j
 const mocks = vi.hoisted(() => ({
   agent: undefined as EventEmitter | undefined,
   updateStatus: vi.fn(),
+  recordEvent: vi.fn(),
   finalizeWorktree: vi.fn(),
   teardownWorktree: vi.fn(),
 }));
@@ -36,7 +37,7 @@ vi.mock('../src/tools/registry.js', () => ({
 }));
 
 vi.mock('../src/observability/logger.js', () => ({
-  recordEvent: vi.fn(),
+  recordEvent: mocks.recordEvent,
 }));
 
 vi.mock('../src/agent/subagent/isolation.js', () => ({
@@ -58,6 +59,7 @@ describe('subagent recovery propagation', () => {
     const task: SubagentTask = {
       id: 'task-1',
       runId: 'run-1',
+      parentTurnId: 'turn-1',
       parentSessionId: 'parent-1',
       sessionId: 'session-1',
       task: 'inspect files',
@@ -103,5 +105,17 @@ describe('subagent recovery propagation', () => {
     expect(task.result).toBeUndefined();
     expect(mocks.finalizeWorktree).not.toHaveBeenCalled();
     expect(mocks.teardownWorktree).toHaveBeenCalledWith(null);
+    expect(mocks.recordEvent).toHaveBeenCalledWith('subagent_spawn', expect.objectContaining({
+      turnId: 'turn-1',
+      sessionId: 'parent-1',
+      runId: 'run-1',
+      taskId: 'task-1',
+    }));
+    expect(mocks.recordEvent).toHaveBeenCalledWith('subagent_done', expect.objectContaining({
+      turnId: 'turn-1',
+      sessionId: 'parent-1',
+      runId: 'run-1',
+      taskId: 'task-1',
+    }));
   });
 });

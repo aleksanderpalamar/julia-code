@@ -66,6 +66,31 @@ function fakeChat(responses: Array<Record<string, unknown> | null>): {
 }
 
 describe('attemptCorrection', () => {
+  it('drains a successful correction stream through its usage-bearing done chunk', async () => {
+    let drained = false;
+    const chat: ChatStreamFn = async function* () {
+      yield {
+        type: 'tool_call',
+        toolCall: { id: 'out', function: { name: 'read', arguments: { path: 'ok.ts' } } },
+      };
+      yield { type: 'done', usage: { promptTokens: 7, completionTokens: 3 } };
+      drained = true;
+    };
+
+    const outcome = await attemptCorrection({
+      toolCall: badCall,
+      errors: missingPathErrors,
+      toolSchema: readToolSchema,
+      messages: baseMessages,
+      model: 'small-model',
+      maxAttempts: 1,
+      chat,
+    });
+
+    expect(outcome).toEqual({ kind: 'corrected', args: { path: 'ok.ts' } });
+    expect(drained).toBe(true);
+  });
+
   it('corrects a malformed call on the first re-prompt', async () => {
     const { chat, calls } = fakeChat([{ path: 'src/config.ts' }]);
 

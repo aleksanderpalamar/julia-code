@@ -6,6 +6,7 @@ import type { ContextHealth } from '../src/context/health.js';
 
 let chatScript: ChatChunk[] = [];
 let chatMessages: ChatMessage[][] = [];
+let chatError: Error | undefined;
 
 vi.mock('../src/providers/registry.js', () => ({
   getProvider: () => ({
@@ -13,6 +14,7 @@ vi.mock('../src/providers/registry.js', () => ({
     async *chat(input: { messages: ChatMessage[] }) {
       chatMessages.push(input.messages);
       for (const c of chatScript) yield c;
+      if (chatError) throw chatError;
     },
   }),
 }));
@@ -92,6 +94,7 @@ import { evaluateToolCall } from '../src/agent/security-gate.js';
 import { runToolCall } from '../src/agent/tool-executor.js';
 import { shouldEmergencyCompact } from '../src/context/health.js';
 import { performEmergencyCompaction } from '../src/agent/compactor.js';
+import { recordEvent } from '../src/observability/logger.js';
 
 const cloudPlan: ModelPlan = {
   loopModel: 'claude-sonnet',
@@ -157,6 +160,7 @@ const initial: IterationState = {
 beforeEach(() => {
   chatScript = [];
   chatMessages = [];
+  chatError = undefined;
   vi.mocked(evaluateToolCall).mockReset().mockResolvedValue({ kind: 'allowed' });
   vi.mocked(runToolCall).mockReset().mockImplementation(async ({ toolName }) => ({
     toolName,
@@ -169,6 +173,7 @@ beforeEach(() => {
   vi.mocked(performEmergencyCompaction).mockReset();
   vi.mocked(addMessage).mockReset();
   vi.mocked(runDiagnostics).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(recordEvent).mockReset();
   mockConfig.diagnosticsCommand = null;
 });
 
@@ -295,6 +300,19 @@ describe('runOneIteration / tool-pick routing', () => {
 });
 
 describe('runOneIteration / error', () => {
+  it('records the LLM call when the provider throws while streaming', async () => {
+    chatError = new Error('provider exploded');
+
+    await expect(runOneIteration(makeDeps(), initial)).rejects.toThrow('provider exploded');
+
+    expect(recordEvent).toHaveBeenCalledWith('llm_call', expect.objectContaining({
+      turnId: 'turn-1',
+      sessionId: 's1',
+      iteration: 1,
+      pass: 'main',
+    }));
+  });
+
   it('returns error when stream fails and retry budget is exhausted', async () => {
     chatScript = [{ type: 'error', error: 'timeout' }];
     const deps = makeDeps();

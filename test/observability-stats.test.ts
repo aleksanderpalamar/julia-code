@@ -16,6 +16,7 @@ import {
   computeLLMMetrics,
   computeGateMetrics,
   computeCompactionMetrics,
+  computeMemoryRetrievalMetrics,
   type AllMetrics,
 } from '../src/observability/metrics/index.js';
 
@@ -117,9 +118,10 @@ describe('formatMetricsForDisplay', () => {
     const llm = computeLLMMetrics(events);
     const gate = computeGateMetrics(events);
     const compaction = computeCompactionMetrics(events);
+    const memory = computeMemoryRetrievalMetrics(events);
 
     const report = formatMetricsForDisplay({
-      ...shell, planner, loops, tools, diagnostics, llm, gate, compaction,
+      ...shell, planner, loops, tools, diagnostics, llm, gate, compaction, memory,
     });
 
     expect(report).toContain('Julia observability stats');
@@ -206,8 +208,37 @@ describe('new metric aggregates', () => {
     expect(m.avgDurationMs).toBe(600);
   });
 
+  it('aggregates memory retrieval availability, volume, score and latency', async () => {
+    recordEvent('memory_retrieval', {
+      turnId: 't1', sessionId: 's1', candidates: 6, returned: 3,
+      topScore: 0.8, durationMs: 20, providerAvailable: true,
+    });
+    recordEvent('memory_retrieval', {
+      turnId: 't2', sessionId: 's1', candidates: 0, returned: 0,
+      topScore: null, durationMs: 40, providerAvailable: false,
+    });
+
+    await flushLogger();
+    const m = computeMemoryRetrievalMetrics(await loadEvents());
+
+    expect(m).toEqual({
+      total: 2,
+      providerAvailable: 1,
+      providerUnavailable: 1,
+      availabilityRate: 0.5,
+      candidates: 6,
+      returned: 3,
+      avgTopScore: 0.8,
+      avgDurationMs: 30,
+    });
+  });
+
   it('reports the new sections only once they have data', async () => {
     recordEvent('gate_decision', { turnId: 't1', sessionId: 's1', iteration: 1, toolName: 'exec', outcome: 'rate_limited', via: 'quota' });
+    recordEvent('memory_retrieval', {
+      turnId: 't1', sessionId: 's1', candidates: 4, returned: 2,
+      topScore: 0.75, durationMs: 12, providerAvailable: true,
+    });
 
     await flushLogger();
     const shell = shellOrchestrationAndSubagents();
@@ -219,13 +250,17 @@ describe('new metric aggregates', () => {
     const llm = computeLLMMetrics(events);
     const gate = computeGateMetrics(events);
     const compaction = computeCompactionMetrics(events);
+    const memory = computeMemoryRetrievalMetrics(events);
 
     const report = formatMetricsForDisplay({
-      ...shell, planner, loops, tools, diagnostics, llm, gate, compaction,
+      ...shell, planner, loops, tools, diagnostics, llm, gate, compaction, memory,
     });
 
     expect(report).toContain('Security gate');
     expect(report).toContain('limited=1');
+    expect(report).toContain('Memory retrieval');
+    expect(report).toContain('provider avail.   1/1 (100%)');
+    expect(report).toContain('candidates/return 4/2');
     expect(report).not.toContain('LLM calls');
     expect(report).not.toContain('Compaction');
   });

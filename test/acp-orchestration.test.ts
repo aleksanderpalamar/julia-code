@@ -867,6 +867,73 @@ describe("ACP Edge Cases", () => {
     expect(spawnedTasks).toHaveLength(8);
     expect(mockManager.prewarm).toHaveBeenCalledWith(8);
   });
+
+  it("falls back without spawning when auto-orchestration exhausts the subagent quota", async () => {
+    const session = createSession();
+    mockChatResponse = [
+      {
+        type: "text",
+        text: JSON.stringify({
+          complex: true,
+          subtasks: [{ task: "task A", model: null }, { task: "task B", model: null }],
+        }),
+      },
+      { type: "done" },
+    ];
+    const quotas = {
+      check: vi.fn(() => ({ kind: "exceeded" as const, scope: "session" as const })),
+      record: vi.fn(),
+    };
+
+    const result = await runOrchestration({
+      sessionId: session.id,
+      turnId: "turn-quota-blocked",
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      quotas,
+      emit: makeSink(),
+    });
+
+    expect(result).toBe(false);
+    expect(quotas.check).toHaveBeenCalledOnce();
+    expect(quotas.check).toHaveBeenCalledWith("subagent", expect.any(Number));
+    expect(quotas.record).not.toHaveBeenCalled();
+    expect(mockManager.spawnMany).not.toHaveBeenCalled();
+  });
+
+  it("spends one subagent quota unit before an auto-orchestration batch", async () => {
+    const session = createSession();
+    mockChatResponse = [
+      {
+        type: "text",
+        text: JSON.stringify({
+          complex: true,
+          subtasks: [{ task: "task A", model: null }, { task: "task B", model: null }],
+        }),
+      },
+      { type: "done" },
+    ];
+    const quotas = {
+      check: vi.fn(() => ({ kind: "within" as const })),
+      record: vi.fn(),
+    };
+
+    const result = await runOrchestration({
+      sessionId: session.id,
+      turnId: "turn-quota-allowed",
+      userMessage: COMPLEX_PROMPT,
+      model: "test-model",
+      quotas,
+      emit: makeSink(),
+    });
+
+    expect(result).toBe(true);
+    expect(quotas.check).toHaveBeenCalledOnce();
+    expect(quotas.record).toHaveBeenCalledOnce();
+    expect(quotas.record).toHaveBeenCalledWith("subagent", expect.any(Number));
+    expect(mockManager.spawnMany).toHaveBeenCalledOnce();
+    expect(mockManager.spawnMany.mock.calls[0][5]).toBe("turn-quota-allowed");
+  });
 });
 
 // Fase 2.1: the orchestrator builds a read-only snapshot from the parent

@@ -136,6 +136,8 @@ export async function executeIterationTools(input: ToolExecutionInput): Promise<
       args: toolArgs,
       budget,
       health,
+      sessionId,
+      turnId,
     });
     recordEvent('tool_call', {
       turnId,

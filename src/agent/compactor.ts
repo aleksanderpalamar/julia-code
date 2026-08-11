@@ -25,6 +25,10 @@ const NO_COMPACTION: CompactionOutcome = {
   durationMs: 0,
 };
 
+function failedCompaction(startedAt: number): CompactionOutcome {
+  return { ...NO_COMPACTION, durationMs: Date.now() - startedAt };
+}
+
 export async function maybeCompact(
   sessionId: string,
   model: string,
@@ -60,8 +64,6 @@ async function summarizeInto(
     (sum, m) => sum + estimateDbMessageTokens(m.content, m.tool_calls),
     0,
   );
-  let tokensAfter = 0;
-
   try {
     const existingCompaction = getLatestCompaction(sessionId);
 
@@ -76,21 +78,22 @@ async function summarizeInto(
     const structured = await performStructuredCompaction(messages, existingStructured, model);
 
     const summary = serializeCompaction(structured);
-    if (summary) {
-      const startId = existingCompaction?.messages_end ?? 0;
-      saveCompaction(sessionId, summary, startId, lastId, 'structured');
-      tokensAfter = estimateTokens(summary);
-    }
-  } catch {
-  }
+    if (!summary) return failedCompaction(startedAt);
 
-  return {
-    performed: true,
-    messagesCompacted: messages.length,
-    tokensBefore,
-    tokensAfter,
-    durationMs: Date.now() - startedAt,
-  };
+    const startId = existingCompaction?.messages_end ?? 0;
+    const tokensAfter = estimateTokens(summary);
+    saveCompaction(sessionId, summary, startId, lastId, 'structured');
+
+    return {
+      performed: true,
+      messagesCompacted: messages.length,
+      tokensBefore,
+      tokensAfter,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch {
+    return failedCompaction(startedAt);
+  }
 }
 
 /**

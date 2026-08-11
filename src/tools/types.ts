@@ -4,6 +4,8 @@ export interface ToolContext {
   projectDir: string;
   isWorktree: boolean;
   worktreeId?: string;
+  sessionId?: string;
+  turnId?: string;
 }
 
 export interface ToolResult {

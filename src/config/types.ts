@@ -26,8 +26,8 @@ const SemanticMemorySchema = z.object({
 });
 
 const ToolQuotaSchema = z.object({
-  perMinute: z.number().default(60),
-  perSession: z.number().default(600),
+  perMinute: z.number().optional(),
+  perSession: z.number().optional(),
 });
 
 const RateLimitsSchema = z.object({

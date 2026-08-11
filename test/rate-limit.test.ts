@@ -80,7 +80,28 @@ describe('pruneState', () => {
 describe('resolveQuota', () => {
   it('prefers a configured override over the built-in default', () => {
     const custom: ToolQuota = { perMinute: 1, perSession: 2 };
-    expect(resolveQuota('exec', { exec: custom })).toBe(custom);
+    expect(resolveQuota('exec', { exec: custom })).toEqual(custom);
+  });
+
+  it('preserves the tool-specific session default for a minute-only override', () => {
+    expect(resolveQuota('exec', { exec: { perMinute: 10 } })).toEqual({
+      perMinute: 10,
+      perSession: 200,
+    });
+  });
+
+  it('preserves the tool-specific minute default for a session-only override', () => {
+    expect(resolveQuota('exec', { exec: { perSession: 100 } })).toEqual({
+      perMinute: 20,
+      perSession: 100,
+    });
+  });
+
+  it('merges partial overrides for unknown tools with the generic fallback', () => {
+    expect(resolveQuota('read', { read: { perSession: 50 } })).toEqual({
+      perMinute: 60,
+      perSession: 50,
+    });
   });
 
   it('falls back to the built-in default when no override is configured', () => {

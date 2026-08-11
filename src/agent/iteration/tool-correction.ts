@@ -84,12 +84,17 @@ async function firstToolCallArgs(
   stream: AsyncGenerator<ChatChunk>,
   toolName: string,
 ): Promise<Record<string, unknown> | null> {
+  let firstMatch: Record<string, unknown> | null = null;
   for await (const chunk of stream) {
-    if (chunk.type === 'tool_call' && chunk.toolCall?.function.name === toolName) {
-      return chunk.toolCall.function.arguments;
+    if (
+      firstMatch === null
+      && chunk.type === 'tool_call'
+      && chunk.toolCall?.function.name === toolName
+    ) {
+      firstMatch = chunk.toolCall.function.arguments;
     }
   }
-  return null;
+  return firstMatch;
 }
 
 function buildCorrectionPrompt(

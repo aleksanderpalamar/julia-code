@@ -5,13 +5,13 @@ import {
   EMPTY_QUOTA_STATE,
   type QuotaGuard,
   type QuotaState,
-  type ToolQuota,
+  type ToolQuotaOverride,
 } from './rate-limit.js';
 
 export class ToolQuotaLedger {
   private readonly sessions = new Map<string, Map<string, QuotaState>>();
 
-  constructor(private readonly overrides: Readonly<Record<string, ToolQuota>> = {}) {}
+  constructor(private readonly overrides: Readonly<Record<string, ToolQuotaOverride>> = {}) {}
 
   forSession(sessionId: string): QuotaGuard {
     return {

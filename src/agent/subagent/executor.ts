@@ -46,6 +46,8 @@ function finalizeTask(opts: FinalizeOpts): void {
   });
 
   recordEvent('subagent_done', {
+    turnId: task.parentTurnId,
+    sessionId: task.parentSessionId,
     runId: task.runId,
     taskId: task.id,
     status,
@@ -76,6 +78,8 @@ export function runTask(deps: RunTaskDeps): void {
   });
 
   recordEvent('subagent_spawn', {
+    turnId: task.parentTurnId,
+    sessionId: task.parentSessionId,
     runId: task.runId,
     taskId: task.id,
     model,

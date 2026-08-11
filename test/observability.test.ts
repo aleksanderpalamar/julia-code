@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,8 @@ describe('observability/logger', () => {
 
   afterEach(() => {
     delete process.env.JULIA_LOG_DIR;
+    delete process.env.JULIA_DEBUG;
+    vi.restoreAllMocks();
     rmSync(logDir, { recursive: true, force: true });
   });
 
@@ -262,6 +264,8 @@ describe('observability/logger — write chain resilience', () => {
 
   afterEach(() => {
     delete process.env.JULIA_LOG_DIR;
+    delete process.env.JULIA_DEBUG;
+    vi.restoreAllMocks();
     rmSync(logDir, { recursive: true, force: true });
   });
 
@@ -280,5 +284,20 @@ describe('observability/logger — write chain resilience', () => {
       .split('\n').filter(Boolean).map(l => JSON.parse(l));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ turnId: 't2', reason: 'done' });
+  });
+
+  it('mirrors debug events even when file logging fails', async () => {
+    process.env.JULIA_DEBUG = '1';
+    process.env.JULIA_LOG_DIR = '/dev/null/nope';
+    resetLoggerStateForTests();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    recordEvent('loop_end', {
+      turnId: 't-debug', sessionId: 's1', iterations: 1, reason: 'error',
+    });
+    await flushObservability();
+
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('[obs]'));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('"turnId":"t-debug"'));
   });
 });

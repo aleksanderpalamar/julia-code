@@ -48,6 +48,25 @@ beforeEach(() => {
 });
 
 describe('runToolCall / success path', () => {
+  it('forwards the active session and turn to the tool context', async () => {
+    vi.mocked(executeTool).mockResolvedValue({ success: true, output: 'ok' });
+
+    await runToolCall({
+      toolName: 'read',
+      args: { path: 'x.ts' },
+      budget: null,
+      health,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+    });
+
+    expect(executeTool).toHaveBeenCalledWith(
+      'read',
+      { path: 'x.ts' },
+      { sessionId: 'session-1', turnId: 'turn-1' },
+    );
+  });
+
   it('passes success output through sanitize → wrap', async () => {
     vi.mocked(executeTool).mockResolvedValue({ success: true, output: 'hello' });
 

@@ -3,9 +3,12 @@ import { computeOrchestrationMetrics, computeSubagentMetrics } from './run-metri
 import { computeDiagnosticsMetrics, computeLoopMetrics, computePlannerMetrics } from './turn-metrics.js';
 import { computeGateMetrics, computeToolMetrics } from './tool-metrics.js';
 import { computeCompactionMetrics, computeLLMMetrics } from './model-metrics.js';
+import { computeMemoryRetrievalMetrics } from './memory-metrics.js';
+import { flushObservability } from '../event-sink.js';
 import type { AllMetrics } from './types.js';
 
 export async function getAllMetrics(): Promise<AllMetrics> {
+  await flushObservability();
   const events = await loadEvents();
 
   return {
@@ -18,6 +21,7 @@ export async function getAllMetrics(): Promise<AllMetrics> {
     llm: computeLLMMetrics(events),
     gate: computeGateMetrics(events),
     compaction: computeCompactionMetrics(events),
+    memory: computeMemoryRetrievalMetrics(events),
   };
 }
 
@@ -26,5 +30,6 @@ export { computeOrchestrationMetrics, computeSubagentMetrics } from './run-metri
 export { computeDiagnosticsMetrics, computeLoopMetrics, computePlannerMetrics } from './turn-metrics.js';
 export { computeGateMetrics, computeToolMetrics } from './tool-metrics.js';
 export { computeCompactionMetrics, computeLLMMetrics } from './model-metrics.js';
+export { computeMemoryRetrievalMetrics } from './memory-metrics.js';
 export { formatMetricsForDisplay } from './report.js';
 export type * from './types.js';

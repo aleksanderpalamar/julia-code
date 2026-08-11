@@ -18,13 +18,15 @@ interface RunToolCallInput {
   args: Record<string, unknown>;
   budget: ContextBudget | null;
   health: ContextHealth;
+  sessionId?: string;
+  turnId?: string;
 }
 
 export async function runToolCall(input: RunToolCallInput): Promise<ExecutedTool> {
-  const { toolName, args, budget, health } = input;
+  const { toolName, args, budget, health, sessionId, turnId } = input;
 
   const start = Date.now();
-  const result = await executeTool(toolName, args);
+  const result = await executeTool(toolName, args, { sessionId, turnId });
   const durationMs = Date.now() - start;
 
   let errorWithHint = result.error;

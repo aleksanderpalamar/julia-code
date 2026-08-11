@@ -12,16 +12,21 @@ vi.mock('../src/session/manager.js', () => ({
 
 vi.mock('../src/context/compaction.js', () => ({
   performStructuredCompaction: vi.fn().mockResolvedValue({}),
-  serializeCompaction: vi.fn().mockReturnValue(''),
+  serializeCompaction: vi.fn().mockReturnValue('{"summary":"ok"}'),
   deserializeCompaction: vi.fn(),
   formatCompactionForContext: vi.fn(),
 }));
 
 import { maybeCompact } from '../src/agent/compactor.js';
 import { getCompactableMessages } from '../src/agent/context.js';
+import { saveCompaction } from '../src/session/manager.js';
+import { performStructuredCompaction, serializeCompaction } from '../src/context/compaction.js';
 
 beforeEach(() => {
   vi.mocked(getCompactableMessages).mockReset();
+  vi.mocked(saveCompaction).mockReset();
+  vi.mocked(performStructuredCompaction).mockReset().mockResolvedValue({} as never);
+  vi.mocked(serializeCompaction).mockReset().mockReturnValue('{"summary":"ok"}');
 });
 
 describe('maybeCompact / beforeCompact callback', () => {
@@ -53,5 +58,36 @@ describe('maybeCompact / beforeCompact callback', () => {
     vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
     const result = await maybeCompact('s', 'm');
     expect(result.performed).toBe(true);
+  });
+
+  it('reports no compaction when structured summarization fails', async () => {
+    vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
+    vi.mocked(performStructuredCompaction).mockRejectedValue(new Error('provider failed'));
+
+    const result = await maybeCompact('s', 'm');
+
+    expect(result.performed).toBe(false);
+    expect(saveCompaction).not.toHaveBeenCalled();
+  });
+
+  it('reports no compaction when serialization produces an empty summary', async () => {
+    vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
+    vi.mocked(serializeCompaction).mockReturnValue('');
+
+    const result = await maybeCompact('s', 'm');
+
+    expect(result.performed).toBe(false);
+    expect(saveCompaction).not.toHaveBeenCalled();
+  });
+
+  it('reports no compaction when persistence fails', async () => {
+    vi.mocked(getCompactableMessages).mockResolvedValue({ messages: [], lastId: 1 });
+    vi.mocked(saveCompaction).mockImplementation(() => {
+      throw new Error('database failed');
+    });
+
+    const result = await maybeCompact('s', 'm');
+
+    expect(result.performed).toBe(false);
   });
 });

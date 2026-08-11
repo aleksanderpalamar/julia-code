@@ -125,6 +125,24 @@ const compactionSection: SectionBuilder = ({ compaction }) => {
   };
 };
 
+const memorySection: SectionBuilder = ({ memory }) => {
+  if (memory.total === 0) return null;
+
+  return {
+    title: 'Memory retrieval',
+    lines: [
+      row('retrievals', memory.total),
+      row(
+        'provider avail.',
+        `${memory.providerAvailable}/${memory.total} (${percentage(memory.availabilityRate)})`,
+      ),
+      row('candidates/return', `${memory.candidates}/${memory.returned}`),
+      row('avg top score', memory.avgTopScore === null ? 'n/a' : memory.avgTopScore.toFixed(3)),
+      row('avg duration', duration(memory.avgDurationMs)),
+    ],
+  };
+};
+
 const diagnosticsSection: SectionBuilder = ({ diagnostics }) => {
   if (diagnostics.total === 0) return null;
 
@@ -157,6 +175,7 @@ const SECTIONS: readonly SectionBuilder[] = [
   llmSection,
   gateSection,
   compactionSection,
+  memorySection,
   diagnosticsSection,
   topToolsSection,
 ];

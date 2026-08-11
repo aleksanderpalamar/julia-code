@@ -95,6 +95,17 @@ export interface CompactionMetrics {
   avgDurationMs: number | null;
 }
 
+export interface MemoryRetrievalMetrics {
+  total: number;
+  providerAvailable: number;
+  providerUnavailable: number;
+  availabilityRate: number | null;
+  candidates: number;
+  returned: number;
+  avgTopScore: number | null;
+  avgDurationMs: number | null;
+}
+
 export interface AllMetrics {
   orchestration: OrchestrationMetrics;
   subagents: SubagentMetrics;
@@ -105,4 +116,5 @@ export interface AllMetrics {
   llm: LLMMetrics;
   gate: GateMetrics;
   compaction: CompactionMetrics;
+  memory: MemoryRetrievalMetrics;
 }

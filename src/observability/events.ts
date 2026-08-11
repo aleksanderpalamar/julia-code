@@ -24,13 +24,13 @@ export interface EventPayloads {
     durationMs: number;
     taskPreview: string;
   };
-  subagent_spawn: {
+  subagent_spawn: TurnScoped & {
     runId: string;
     taskId: string;
     model: string | undefined;
     taskPreview: string;
   };
-  subagent_done: {
+  subagent_done: TurnScoped & {
     runId: string;
     taskId: string;
     status: SubagentStatus;

@@ -35,7 +35,6 @@ export async function streamLLMChat(input: {
 
   const provider = getProvider('ollama');
   const startedAt = Date.now();
-  const stream = provider.chat({ model, messages, tools });
 
   let fullText = '';
   const toolCalls: ToolCall[] = [];
@@ -55,35 +54,37 @@ export async function streamLLMChat(input: {
     });
   };
 
-  for await (const chunk of stream) {
-    switch (chunk.type) {
-      case 'text':
-        fullText += chunk.text!;
-        if (!suppressText) emit.chunk(chunk.text!);
-        break;
-      case 'tool_call':
-        toolCalls.push(chunk.toolCall!);
-        emit.toolCall(chunk.toolCall!);
-        break;
-      case 'done':
-        if (chunk.usage) {
-          usage = chunk.usage;
-          const total = chunk.usage.promptTokens + chunk.usage.completionTokens;
-          addSessionTokens(sessionId, total);
-          emit.usage(chunk.usage);
-        }
-        break;
-      case 'error':
-        record();
-        if (canRetryOnError) {
-          recordEvent('retry', { turnId, sessionId, iteration, kind: 'stream' });
-          emit.clearStreaming();
-          return { kind: 'retry' };
-        }
-        return { kind: 'error', message: chunk.error! };
+  try {
+    const stream = provider.chat({ model, messages, tools });
+    for await (const chunk of stream) {
+      switch (chunk.type) {
+        case 'text':
+          fullText += chunk.text!;
+          if (!suppressText) emit.chunk(chunk.text!);
+          break;
+        case 'tool_call':
+          toolCalls.push(chunk.toolCall!);
+          emit.toolCall(chunk.toolCall!);
+          break;
+        case 'done':
+          if (chunk.usage) {
+            usage = chunk.usage;
+            const total = chunk.usage.promptTokens + chunk.usage.completionTokens;
+            addSessionTokens(sessionId, total);
+            emit.usage(chunk.usage);
+          }
+          break;
+        case 'error':
+          if (canRetryOnError) {
+            recordEvent('retry', { turnId, sessionId, iteration, kind: 'stream' });
+            emit.clearStreaming();
+            return { kind: 'retry' };
+          }
+          return { kind: 'error', message: chunk.error! };
+      }
     }
+    return { kind: 'ok', fullText, toolCalls };
+  } finally {
+    record();
   }
-
-  record();
-  return { kind: 'ok', fullText, toolCalls };
 }

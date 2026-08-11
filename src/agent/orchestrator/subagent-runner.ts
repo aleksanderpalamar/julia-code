@@ -8,6 +8,7 @@ type SubagentEmit = Pick<
 
 interface SubagentExecutionDeps {
   sessionId: string;
+  turnId: string;
   runId: string;
   subtasks: PlannedSubtask[];
   sharedContext: string | undefined;
@@ -27,7 +28,7 @@ interface TrackedSubagents {
 }
 
 export async function executeSubagents(deps: SubagentExecutionDeps): Promise<SubagentExecutionResult> {
-  const { sessionId, runId, subtasks, sharedContext, emit } = deps;
+  const { sessionId, turnId, runId, subtasks, sharedContext, emit } = deps;
   const manager = getSubagentManager();
 
   manager.prewarm(subtasks.length);
@@ -45,7 +46,7 @@ export async function executeSubagents(deps: SubagentExecutionDeps): Promise<Sub
     model: sub.model,
     sharedContext,
   }));
-  const taskIds = await manager.spawnMany(sessionId, descriptors, runId);
+  const taskIds = await manager.spawnMany(sessionId, descriptors, runId, undefined, undefined, turnId);
 
   registerSpawnedIds(taskIds, subtasks, tracked, emit);
 

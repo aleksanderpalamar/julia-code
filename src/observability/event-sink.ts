@@ -28,18 +28,31 @@ function isDebugEnabled(): boolean {
   return process.env.JULIA_DEBUG === '1';
 }
 
-async function append(event: ObservabilityEvent): Promise<void> {
-  const line = `${JSON.stringify(event)}\n`;
-  await ensureDirectory();
-  await appendFile(getObservabilityLogPath(), line, { mode: FILE_MODE });
-  if (isDebugEnabled()) {
+function mirrorDebug(line: string): void {
+  if (!isDebugEnabled()) return;
+  try {
     process.stderr.write(`[obs] ${line}`);
+  } catch {
+    // Debug output is best-effort and must not affect file persistence.
   }
 }
 
+async function append(line: string): Promise<void> {
+  await ensureDirectory();
+  await appendFile(getObservabilityLogPath(), line, { mode: FILE_MODE });
+}
+
 export function writeEvent(event: ObservabilityEvent): void {
+  let line: string;
+  try {
+    line = `${JSON.stringify(event)}\n`;
+  } catch {
+    return;
+  }
+
+  mirrorDebug(line);
   pendingWrites = pendingWrites
-    .then(() => append(event))
+    .then(() => append(line))
     .catch(() => undefined);
 }
 

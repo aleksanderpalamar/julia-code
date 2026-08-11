@@ -3,6 +3,8 @@ export interface ToolQuota {
   perSession: number;
 }
 
+export type ToolQuotaOverride = Partial<ToolQuota>;
+
 export interface QuotaState {
   readonly total: number;
   readonly recent: readonly number[];
@@ -71,10 +73,12 @@ export function recordHit(state: QuotaState, now: number): QuotaState {
 
 export function resolveQuota(
   toolName: string,
-  overrides: Readonly<Record<string, ToolQuota>>,
+  overrides: Readonly<Record<string, ToolQuotaOverride>>,
   fallback: ToolQuota = FALLBACK_QUOTA,
 ): ToolQuota {
-  return overrides[toolName] ?? DEFAULT_TOOL_QUOTAS[toolName] ?? fallback;
+  const base = DEFAULT_TOOL_QUOTAS[toolName] ?? fallback;
+  const override = overrides[toolName];
+  return override ? { ...base, ...override } : base;
 }
 
 export function formatQuotaRefusal(toolName: string, verdict: QuotaVerdict): string {

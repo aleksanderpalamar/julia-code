@@ -52,14 +52,18 @@ export function getToolSchema(name: string): ToolSchema | null {
   return tool ? toolToSchema(tool) : null;
 }
 
-export async function executeTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+export async function executeTool(
+  name: string,
+  args: Record<string, unknown>,
+  trace?: Pick<ToolContext, 'sessionId' | 'turnId'>,
+): Promise<ToolResult> {
   const tool = tools.get(name);
   if (!tool) {
     return { success: false, output: '', error: `Unknown tool: ${name}` };
   }
 
   try {
-    const context = getActiveToolContext();
+    const context = { ...getActiveToolContext(), ...trace };
     return await tool.execute(args, context);
   } catch (err) {
     return {

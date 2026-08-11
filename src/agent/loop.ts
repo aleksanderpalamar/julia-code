@@ -84,11 +84,11 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
 
     this.running = true;
     this.abortController = new AbortController();
+    const turnId = randomUUID();
     setCurrentSessionId(sessionId);
-    setSubagentSessionId(sessionId);
+    setSubagentSessionId(sessionId, turnId);
     const config = getConfig();
     const requestedModel = model ?? config.defaultModel;
-    const turnId = randomUUID();
 
     const plan = await resolveModelPlan(requestedModel, config.toolModel, config.routeTools);
     const { loopModel, auxModel } = plan;
@@ -167,6 +167,7 @@ export class AgentLoop extends EventEmitter<AgentEvents> {
         userMessage,
         model: auxModel,
         excludeTools: this.options.excludeTools,
+        quotas,
         emit: createOrchestrationSink(this),
       });
       if (orchestrated) {
