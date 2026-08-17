@@ -1,3 +1,5 @@
+import { hasRawToolCallShape } from '../providers/tool-call-fallback.js';
+
 export interface AnnouncedToolIntent {
   index: number;
   phrase: string;
@@ -53,6 +55,8 @@ function findAnnouncedToolIntents(text: string): AnnouncedToolIntent[] {
 
 export function needsToolCalling(text: string): boolean {
   const lower = normalizeIntentText(text);
+
+  if (hasRawToolCallShape(text)) return true;
 
   const refusalIndicators = [
     'não consigo acessar', 'não consigo executar', 'não consigo rodar',

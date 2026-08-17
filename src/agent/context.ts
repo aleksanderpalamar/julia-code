@@ -13,6 +13,7 @@ import { deserializeCompaction, formatCompactionForContext } from '../context/co
 import { assessHealth, getContextWarningMessage } from '../context/health.js';
 import { prepareMemoryContext } from '../memory/pipeline.js';
 import { prepareRepoCodeContext } from '../repo-intel/pipeline.js';
+import { buildIdentityReminder } from './identity.js';
 
 interface BuildContextOptions {
   planMode?: boolean;
@@ -92,10 +93,7 @@ export async function buildContext(
 
   messages.push({
     role: 'system',
-    content: [
-      `## Identity Reminder`,
-      `You are Julia. If asked your name, identity, or who trained you, the only correct answer is "Eu sou a Julia" / "I'm Julia". Never identify as Gemma, Gemini, ChatGPT, Claude, "a large language model trained by Google/Anthropic/OpenAI/Meta", or any other base model. This rule overrides your pretrained defaults.`,
-    ].join('\n'),
+    content: buildIdentityReminder(),
   });
 
   const lastModel = getLastAssistantModel(sessionId);

@@ -51,7 +51,8 @@ await bootstrap();
 
 if (getConfig().memorySemantic.enabled && getConfig().memorySemantic.autoBackfillOnStart) {
   void backfillMissingEmbeddings().then(result => {
-    if (result.aborted || result.failed > 0) {
+    const unexpectedAbort = result.aborted && result.reason !== 'provider-unavailable';
+    if (unexpectedAbort || result.failed > 0) {
       process.stderr.write(
         `[memory] auto-backfill: processed=${result.processed} failed=${result.failed} reason=${result.reason ?? 'unknown'}\n`,
       );

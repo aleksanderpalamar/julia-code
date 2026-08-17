@@ -2,6 +2,7 @@ import type { EmbeddingProvider } from './embeddings/index.js';
 import { bufferToFloat32, cosine, recencyScore } from './similarity.js';
 import { getEmbeddedMemories, type Memory } from '../session/manager.js';
 import type { EmbeddedMemory, RankedMemory, RankingWeights } from './types.js';
+import { isSensitiveMemoryKey } from './sensitivity.js';
 
 const DEFAULT_IMPORTANCE = 0.5;
 
@@ -32,7 +33,7 @@ export async function retrieveRelevantMemories(
 
   const loader = deps.loadCandidates ?? ((n) => getEmbeddedMemories(n));
   const poolSize = deps.candidatePoolSize ?? 500;
-  const candidates = loader(poolSize);
+  const candidates = loader(poolSize).filter(memory => !isSensitiveMemoryKey(memory.key));
   if (candidates.length === 0) return [];
 
   const embedded = decodeEmbeddings(candidates, queryVec.length);

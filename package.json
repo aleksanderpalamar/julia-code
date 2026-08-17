@@ -23,7 +23,7 @@
   },
   "scripts": {
     "start": "tsx juju.ts",
-    "dev": "tsx watch juju.ts",
+    "dev": "tsx juju.ts",
     "build": "tsc && node scripts/fix-shebang.mjs",
     "prepublishOnly": "npm run build",
     "test": "vitest",

@@ -52,7 +52,11 @@ vi.mock("../src/memory/retrieval.js", () => ({
   retrieveRelevantMemories: (...args: unknown[]) => retrieveMock(...args as []),
 }));
 
-import { prepareMemoryContext, legacyRecentMemoriesBlock } from "../src/memory/pipeline.js";
+import {
+  prepareMemoryContext,
+  legacyRecentMemoriesBlock,
+  legacyRelevantMemoriesBlock,
+} from "../src/memory/pipeline.js";
 
 beforeEach(() => {
   mockConfig.memorySemantic.enabled = false;
@@ -77,8 +81,9 @@ describe("prepareMemoryContext", () => {
       { key: "user-os", content: "arch", category: "user" },
     ]);
     const out = await prepareMemoryContext("s", "qual meu OS?", 500);
-    expect(out).toContain("## Your Memories");
+    expect(out).toContain("## Fatos sobre o usuário humano");
     expect(out).toContain("**user-os**: arch");
+    expect(out).toContain("pertencem ao usuário humano, nunca à Julia");
     expect(isAvailableMock).not.toHaveBeenCalled();
     expect(retrieveMock).not.toHaveBeenCalled();
   });
@@ -87,8 +92,9 @@ describe("prepareMemoryContext", () => {
     mockConfig.memorySemantic.enabled = false;
     recentMemoriesMock.mockReturnValue([]);
     const out = await prepareMemoryContext("s", "qual meu OS?", 500);
-    expect(out).toContain("## Your Memories");
-    expect(out).toContain("no saved memories yet");
+    expect(out).toContain("## Fatos sobre o usuário humano");
+    expect(out).toContain("no saved facts yet");
+    expect(out).toContain("referem-se ao usuário humano, não à Julia");
     expect(out).toContain("memory` action=recall");
   });
 
@@ -168,8 +174,8 @@ describe("legacyRecentMemoriesBlock", () => {
   it("returns empty-DB anchor stub when no memories", () => {
     recentMemoriesMock.mockReturnValue([]);
     const out = legacyRecentMemoriesBlock(500);
-    expect(out).toContain("## Your Memories");
-    expect(out).toContain("no saved memories yet");
+    expect(out).toContain("## Fatos sobre o usuário humano");
+    expect(out).toContain("no saved facts yet");
   });
 
   it("returns '' when budget is zero (memory section disabled)", () => {
@@ -186,5 +192,59 @@ describe("legacyRecentMemoriesBlock", () => {
     const tight = legacyRecentMemoriesBlock(120);
     const loose = legacyRecentMemoriesBlock(1000);
     expect(loose.length).toBeGreaterThan(tight.length);
+  });
+
+  it("does not let an oversized recent memory hide a smaller relevant memory", () => {
+    recentMemoriesMock.mockReturnValue([
+      { key: "large-recent-note", content: "x".repeat(2000), category: "general" },
+      { key: "user-name", content: "The user's name is Aleksander", category: "user" },
+    ]);
+
+    const out = legacyRelevantMemoriesBlock("who am i", 40);
+
+    expect(out).toContain("**user-name**");
+    expect(out).not.toContain("large-recent-note");
+  });
+
+  it("ranks an older identity memory ahead of a newer unrelated memory", () => {
+    recentMemoriesMock.mockReturnValue([
+      { key: "project-release", content: "The current package release", category: "project" },
+      { key: "user-name", content: "The user's name is Aleksander", category: "user" },
+    ]);
+
+    const out = legacyRelevantMemoriesBlock("Tu sabes quem és eu?", 25);
+
+    expect(out).toContain("**user-name**");
+    expect(out).not.toContain("project-release");
+  });
+
+  it("makes the identity boundary explicit for the exact local-model question", () => {
+    recentMemoriesMock.mockReturnValue([
+      {
+        key: "user-name",
+        content: "The user's name is Aleksander Palamar",
+        category: "user",
+      },
+    ]);
+
+    const out = legacyRelevantMemoriesBlock("Oi tu sabe quem sou eu?", 500);
+
+    expect(out).toContain("Os fatos abaixo pertencem ao usuário humano, nunca à Julia.");
+    expect(out).toContain('começando com "Você" ou "You"');
+    expect(out).toContain("Nunca apresente nome, identidade");
+    expect(out).not.toContain("## Your Memories");
+  });
+
+  it("keeps credential-like memories out of automatic context", () => {
+    recentMemoriesMock.mockReturnValue([
+      { key: "user-sudo-password", content: "credential-canary", category: "user" },
+      { key: "user-name", content: "Aleksander", category: "user" },
+    ]);
+
+    const out = legacyRelevantMemoriesBlock("who am i", 500);
+
+    expect(out).not.toContain("user-sudo-password");
+    expect(out).not.toContain("credential-canary");
+    expect(out).toContain("user-name");
   });
 });
