@@ -649,6 +649,28 @@ describe('runOneIteration / switch to cloud on refusal', () => {
     expect(deps.sink.events.some(e => e[0] === 'model_switch' && e[1] === 'qwen2.5-coder')).toBe(true);
     expect(deps.sink.events.some(e => e[0] === 'clear_streaming')).toBe(true);
   });
+
+  it('switches to toolModel when a local model emits a raw tool-call envelope', async () => {
+    chatScript = [
+      {
+        type: 'text',
+        text: '{ "name": "memory", "arguments": { "action": "recall", "query": "who am i" } }',
+      },
+      { type: 'done' },
+    ];
+    const deps = makeDeps({ plan: fallbackPlan });
+
+    const outcome = await runOneIteration(deps, initial);
+
+    expect(outcome).toMatchObject({
+      kind: 'continue',
+      reason: 'model-switch',
+      state: { switchedToCloud: true },
+    });
+    expect(deps.sink.events).toContainEqual(['model_switch', 'qwen2.5-coder']);
+    expect(deps.sink.events).toContainEqual(['clear_streaming']);
+    expect(addMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe('runOneIteration / emergency compaction', () => {

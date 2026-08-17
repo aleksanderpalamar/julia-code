@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { HooksSchema } from '../hooks/schema.js';
 
 const SemanticMemorySchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   provider: z.enum(['ollama', 'null']).default('ollama'),
   embeddingModel: z.string().default('nomic-embed-text'),
   rankingWeights: z.object({
@@ -13,16 +13,16 @@ const SemanticMemorySchema = z.object({
   recencyHalflifeDays: z.number().default(30),
   maxMemories: z.number().default(5),
   availabilityCheckTtlMs: z.number().default(30_000),
-  autoBackfillOnStart: z.boolean().default(false),
+  autoBackfillOnStart: z.boolean().default(true),
 }).default({
-  enabled: false,
+  enabled: true,
   provider: 'ollama',
   embeddingModel: 'nomic-embed-text',
   rankingWeights: { similarity: 0.6, importance: 0.3, recency: 0.1 },
   recencyHalflifeDays: 30,
   maxMemories: 5,
   availabilityCheckTtlMs: 30_000,
-  autoBackfillOnStart: false,
+  autoBackfillOnStart: true,
 });
 
 const ToolQuotaSchema = z.object({

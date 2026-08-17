@@ -58,6 +58,12 @@ describe('needsToolCalling / intent indicators', () => {
     expect(needsToolCalling('I’ll check the file now.')).toBe(true);
     expect(needsToolCalling('Let me see what is there.')).toBe(true);
   });
+
+  it('detects a raw Qwen tool-call envelope', () => {
+    expect(needsToolCalling(
+      '{ "name": "memory", "arguments": { "action": "recall", "query": "who am i" } }',
+    )).toBe(true);
+  });
 });
 
 describe('needsToolCalling / neutral text', () => {

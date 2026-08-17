@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { LLMProvider, ChatMessage, ChatChunk, ToolSchema, ToolCall } from './types.js';
 import { getConfig } from '../config/index.js';
 import { StreamingTemplateStripper, stripTemplateLeakage } from './sanitize.js';
+import { getContextLength } from '../context/model-info.js';
+import { parseFallbackToolCalls, ToolCallTextBuffer } from './tool-call-fallback.js';
 
 export class OllamaProvider implements LLMProvider {
   name = 'ollama';
@@ -12,11 +14,13 @@ export class OllamaProvider implements LLMProvider {
     tools?: ToolSchema[];
   }): AsyncGenerator<ChatChunk> {
     const { ollamaHost } = getConfig();
+    const contextLength = await getContextLength(params.model);
 
     const body: Record<string, unknown> = {
       model: params.model,
       messages: params.messages.map(formatMessage),
       stream: true,
+      options: { num_ctx: contextLength },
     };
 
     if (params.tools?.length) {
@@ -51,6 +55,7 @@ export class OllamaProvider implements LLMProvider {
     let fullText = '';
     const accumulatedToolCalls: ToolCall[] = [];
     const textStripper = new StreamingTemplateStripper();
+    const toolCallTextBuffer = new ToolCallTextBuffer();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -87,19 +92,31 @@ export class OllamaProvider implements LLMProvider {
         if (chunk.message?.content) {
           fullText += chunk.message.content;
           const cleaned = textStripper.push(chunk.message.content);
-          if (cleaned) yield { type: 'text', text: cleaned };
+          const visible = toolCallTextBuffer.push(cleaned);
+          if (visible) yield { type: 'text', text: visible };
         }
 
         if (chunk.done) {
           const tail = textStripper.flush();
-          if (tail) yield { type: 'text', text: tail };
+          const visibleTail = toolCallTextBuffer.push(tail);
 
           if (accumulatedToolCalls.length === 0 && params.tools?.length) {
-            const fallbackCalls = parseFallbackToolCalls(stripTemplateLeakage(fullText));
+            const fallbackCalls = parseFallbackToolCalls(
+              stripTemplateLeakage(fullText),
+              params.tools,
+            );
             for (const tc of fallbackCalls) {
               accumulatedToolCalls.push(tc);
               yield { type: 'tool_call', toolCall: tc };
             }
+          }
+
+          if (accumulatedToolCalls.length > 0) {
+            toolCallTextBuffer.discard();
+          } else {
+            const bufferedTail = toolCallTextBuffer.flush();
+            const remainingText = visibleTail + bufferedTail;
+            if (remainingText) yield { type: 'text', text: remainingText };
           }
 
           yield {
@@ -138,66 +155,6 @@ function formatMessage(msg: ChatMessage): Record<string, unknown> {
   }
 
   return formatted;
-}
-
-function parseFallbackToolCalls(text: string): ToolCall[] {
-  let calls = parseToolCallJson(text);
-  if (calls.length > 0) return calls;
-
-  calls = parseFunctionCallsXml(text);
-  if (calls.length > 0) return calls;
-
-  return [];
-}
-
-function parseToolCallJson(text: string): ToolCall[] {
-  const calls: ToolCall[] = [];
-  const regex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]);
-      if (parsed.name) {
-        calls.push({
-          id: randomUUID(),
-          function: {
-            name: parsed.name,
-            arguments: parsed.arguments ?? parsed.args ?? {},
-          },
-        });
-      }
-    } catch {
-    }
-  }
-
-  return calls;
-}
-
-function parseFunctionCallsXml(text: string): ToolCall[] {
-  const calls: ToolCall[] = [];
-  const invokeRegex = /<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/g;
-  const paramRegex = /<parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/parameter>/g;
-
-  let invokeMatch: RegExpExecArray | null;
-  while ((invokeMatch = invokeRegex.exec(text)) !== null) {
-    const name = invokeMatch[1];
-    const body = invokeMatch[2];
-    const args: Record<string, unknown> = {};
-
-    let paramMatch: RegExpExecArray | null;
-    paramRegex.lastIndex = 0;
-    while ((paramMatch = paramRegex.exec(body)) !== null) {
-      args[paramMatch[1]] = paramMatch[2].trim();
-    }
-
-    calls.push({
-      id: randomUUID(),
-      function: { name, arguments: args },
-    });
-  }
-
-  return calls;
 }
 
 export async function listOllamaModels(): Promise<string[]> {

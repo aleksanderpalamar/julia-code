@@ -5,7 +5,13 @@ import { recordEvent } from '../observability/logger.js';
 import { decideGating } from './gating.js';
 import { getEmbeddingProvider, isEmbeddingProviderAvailable } from './embeddings/index.js';
 import { retrieveRelevantMemories } from './retrieval.js';
-import { buildContextBlock } from './context-builder.js';
+import {
+  buildContextBlock,
+  USER_FACTS_FOOTER_LINE,
+  USER_FACTS_HEADER_LINES,
+  USER_FACTS_HEADING,
+} from './context-builder.js';
+import { isSensitiveMemoryKey } from './sensitivity.js';
 
 export async function prepareMemoryContext(
   sessionId: string,
@@ -17,7 +23,7 @@ export async function prepareMemoryContext(
 
   const config = getConfig();
   if (!config.memorySemantic.enabled) {
-    return legacyRecentMemoriesBlock(budgetTokens);
+    return legacyRelevantMemoriesBlock(input, budgetTokens);
   }
 
   if (!input || !input.trim()) {
@@ -35,7 +41,7 @@ export async function prepareMemoryContext(
       turnId, sessionId, candidates: 0, returned: 0, topScore: null,
       startedAt, providerAvailable: false,
     });
-    return legacyRecentMemoriesBlock(budgetTokens);
+    return legacyRelevantMemoriesBlock(input, budgetTokens);
   }
 
   const provider = getEmbeddingProvider();
@@ -57,7 +63,7 @@ export async function prepareMemoryContext(
   });
 
   if (ranked.length === 0) {
-    return legacyRecentMemoriesBlock(budgetTokens);
+    return legacyRelevantMemoriesBlock(input, budgetTokens);
   }
 
   return buildContextBlock(ranked, budgetTokens);
@@ -85,16 +91,33 @@ function recordRetrieval(input: {
 }
 
 export function legacyRecentMemoriesBlock(budgetTokens: number): string {
+  return buildLegacyMemoryBlock(getRecentMemories(30), budgetTokens);
+}
+
+export function legacyRelevantMemoriesBlock(
+  input: string | null,
+  budgetTokens: number,
+): string {
+  const memories = getRecentMemories(30);
+  if (!input?.trim()) return buildLegacyMemoryBlock(memories, budgetTokens);
+  return buildLegacyMemoryBlock(rankLegacyMemories(memories, input), budgetTokens);
+}
+
+function buildLegacyMemoryBlock(
+  memories: ReturnType<typeof getRecentMemories>,
+  budgetTokens: number,
+): string {
   if (budgetTokens <= 0) return '';
 
-  const allMemories = getRecentMemories(30);
+  const safeMemories = memories.filter(memory => !isSensitiveMemoryKey(memory.key));
 
-  if (allMemories.length === 0) {
+  if (safeMemories.length === 0) {
     return [
-      `## Your Memories`,
-      `(no saved memories yet for this user)`,
+      USER_FACTS_HEADING,
+      `(no saved facts yet for this user)`,
       ``,
-      `When the user asks identity questions ("quem sou eu?", "do you know who I am?")`,
+      `Perguntas como "quem sou eu?" e "who am I?" referem-se ao usuário humano, não à Julia.`,
+      `Quando o usuário fizer uma dessas perguntas,`,
       `do NOT say "I have no memory" — either call \`memory\` action=recall to`,
       `double-check, or invite the user to share so you can save it via`,
       `\`memory\` action=save.`,
@@ -103,29 +126,80 @@ export function legacyRecentMemoriesBlock(budgetTokens: number): string {
 
   const memoryLines: string[] = [];
   let memTokens = 0;
-  for (const m of allMemories) {
-    const line = `- [${m.category}] **${m.key}**: ${m.content}`;
+  for (const m of safeMemories) {
+    const line = `- Fato do usuário [${m.category}] **${m.key}**: ${m.content}`;
     const lineTokens = estimateTokens(line);
-    if (memTokens + lineTokens > budgetTokens) break;
+    if (memTokens + lineTokens > budgetTokens) continue;
     memoryLines.push(line);
     memTokens += lineTokens;
   }
 
   if (memoryLines.length === 0) {
     return [
-      `## Your Memories`,
-      `(${allMemories.length} memories exist but none fit the current budget)`,
-      `Use \`memory\` action=recall with a focused query to retrieve specific facts.`,
+      USER_FACTS_HEADING,
+      `(${safeMemories.length} facts about the user exist but none fit the current budget)`,
+      `Use \`memory\` action=recall with a focused query to retrieve them.`,
     ].join('\n');
   }
 
   return [
-    `## Your Memories`,
-    `IMPORTANT: ALWAYS check these memories BEFORE executing tools or commands.`,
-    `If the answer to the user's question is already here, respond directly without making tool calls.`,
-    `These are facts you saved from previous sessions:`,
+    ...USER_FACTS_HEADER_LINES,
     ...memoryLines,
     ``,
-    `Use the \`memory\` tool to save new memories or search for more.`,
+    USER_FACTS_FOOTER_LINE,
   ].join('\n');
+}
+
+function rankLegacyMemories(
+  memories: ReturnType<typeof getRecentMemories>,
+  input: string,
+): ReturnType<typeof getRecentMemories> {
+  const queryTokens = expandQueryTokens(input);
+  return memories
+    .map((memory, recencyIndex) => ({
+      memory,
+      recencyIndex,
+      relevance: scoreLegacyMemory(memory, queryTokens),
+    }))
+    .sort((left, right) => (
+      right.relevance - left.relevance || left.recencyIndex - right.recencyIndex
+    ))
+    .map(candidate => candidate.memory);
+}
+
+function scoreLegacyMemory(
+  memory: ReturnType<typeof getRecentMemories>[number],
+  queryTokens: ReadonlySet<string>,
+): number {
+  const keyTokens = new Set(tokenize(memory.key));
+  const categoryTokens = new Set(tokenize(memory.category));
+  const contentTokens = new Set(tokenize(memory.content));
+  let score = 0;
+  for (const token of queryTokens) {
+    if (keyTokens.has(token)) score += 6;
+    if (categoryTokens.has(token)) score += 3;
+    if (contentTokens.has(token)) score += 2;
+  }
+  return score;
+}
+
+function expandQueryTokens(input: string): ReadonlySet<string> {
+  const tokens = new Set(tokenize(input));
+  const normalized = normalize(input);
+  const identityQuestion = /\b(?:quem\s+(?:sou|es)\s+eu|quem\s+eu\s+sou|(?:tu|voce)\s+sabe[s]?\s+quem\s+(?:sou|es)\s+eu|who\s+am\s+i|do\s+you\s+know\s+(?:me|who\s+i\s+am))\b/u;
+  if (identityQuestion.test(normalized)) {
+    ['user', 'name', 'nome', 'identity', 'identidade'].forEach(token => tokens.add(token));
+  }
+  return tokens;
+}
+
+function tokenize(value: string): readonly string[] {
+  return normalize(value).split(/[^a-z0-9]+/u).filter(token => token.length > 1);
+}
+
+function normalize(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 }

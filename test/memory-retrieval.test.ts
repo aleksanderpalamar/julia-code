@@ -147,6 +147,20 @@ describe("retrieveRelevantMemories", () => {
     expect(ranked).toHaveLength(1);
     expect(ranked[0].effectiveImportance).toBe(0.5);
   });
+
+  it("excludes credential-like keys from semantic retrieval", async () => {
+    const provider = makeProvider();
+    const ranked = await retrieveRelevantMemories("who am i", {
+      ...defaultDeps,
+      provider,
+      loadCandidates: () => [
+        makeMemory({ key: "user-api-key", vector: [1, 0, 0] }),
+        makeMemory({ key: "user-name", vector: [1, 0, 0] }),
+      ],
+    });
+
+    expect(ranked.map(memory => memory.key)).toEqual(["user-name"]);
+  });
 });
 
 describe("buildContextBlock", () => {
@@ -171,7 +185,8 @@ describe("buildContextBlock", () => {
 
   it("renders a valid memories section within the token budget", () => {
     const block = buildContextBlock(ranked, 500);
-    expect(block).toContain("## Your Memories");
+    expect(block).toContain("## Fatos sobre o usuário humano");
+    expect(block).toContain("pertencem ao usuário humano, nunca à Julia");
     expect(block).toContain("**user-os**: arch linux");
     expect(block).toContain("**project-stack**: typescript + node");
     expect(block).toContain("Use the `memory` tool");
@@ -187,8 +202,22 @@ describe("buildContextBlock", () => {
   });
 
   it("truncates the list when tokens exceed the budget", () => {
-    const tight = buildContextBlock(ranked, 80);
+    const tight = buildContextBlock(ranked, 140);
     const loose = buildContextBlock(ranked, 500);
     expect(tight.length).toBeLessThan(loose.length);
+  });
+
+  it("continues past an oversized memory to include a smaller one", () => {
+    const oversized: RankedMemory = {
+      ...ranked[0],
+      key: "oversized",
+      content: "x".repeat(2000),
+      score: 1,
+    };
+
+    const block = buildContextBlock([oversized, ranked[1]], 260);
+
+    expect(block).not.toContain("oversized");
+    expect(block).toContain("project-stack");
   });
 });
